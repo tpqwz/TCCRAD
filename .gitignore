@@ -1,0 +1,5 @@
+build/
+*.o
+*.tmp
+out/
+third_party/lvgl-cache/
