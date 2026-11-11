@@ -2,13 +2,17 @@
 
 **0.1.0-alpha.1.** A rapid-application designer for C. It is the same kind of tool as [ImRAD](https://github.com/tpecholt/imrad): you lay out a window, bind fields, keep your own code in marked regions, and the generated source stays editable. The language is C. The compiler for the programs you design is [TinyCC](https://bellard.org/tcc/). The widget sets are [Nuklear](https://github.com/Immediate-Mode-UI/Nuklear), [libui](https://github.com/andlabs/libui), and [LVGL](https://lvgl.io/) 9.
 
-The designer itself is a Nuklear program on X11. It builds with gcc or with `tcc`. This release is alpha. The version is in `VERSION`.
+The designer itself is a Nuklear program on X11. Its text is DejaVu Sans through Xft, so the display-size control stays an outline font. It builds with gcc or with `tcc`. This release is alpha. The version is in `VERSION`. A Nuklear program it generates uses the same outline font, at 16 pixels times the form scale.
 
 Linux x86_64 builds are published on each push. A version tag `v*` also attaches the single executable `tccrad` to a GitHub release. That file is the program, not an archive. It links libX11 and libm, which a normal Linux desktop already has.
 
 ![The tccrad designer](docs/designer.png)
 
 ![A program the designer generated, built with TinyCC](docs/app-nuklear.png)
+
+## Sample
+
+`examples/bench.c` is a desk you can open with File, Open. It is sized to exercise the designer: menus, four tabs, two-way fields (including a password, a slider, a combo, radios, and a color), a progress bar bound to the gain, a readings table, a tree, a splitter, a child meter, an overlay status line, a popup, and an About modal. File, New run and Reset clear the counters. View, Tip opens the popup. Help, About opens the modal. Run pass counts only while Armed is checked. Edits climb on change, toggle, and table select. A draw-pre region rewrites the status line every frame, and a fields region adds `scratch`, which draw-post increments. Compact and night each hide one notes label until that configuration is active. Sizes are dialog units at scale 1000. The matching header is `examples/bench.h`.
 
 ## What you can design
 
@@ -35,7 +39,7 @@ make tcc          # the designer, compiled by tcc
 ./build/tccrad
 ```
 
-`make test` checks the document round-trip, compiles a generated Nuklear program with gcc and tcc, and typechecks the libui and LVGL output against stubs in `tests/stubs/`. A libui build compiles `third_party/libui`, an X11 implementation of the `ui.h` calls tccrad emits, and links `-lX11`. An LVGL build compiles the vendored LVGL 9.4 sources in `third_party/lvgl` into `third_party/lvgl-cache` and reuses those objects (X11 window, `-lX11 -lpthread -lm`). `TCCRAD_LVGL` can point at another directory that contains `lvgl.h` and `src/`.
+`make test` checks the document round-trip, compiles a generated Nuklear program with gcc and tcc, and typechecks the libui and LVGL output against stubs in `tests/stubs/`. A libui build compiles `third_party/libui`, an X11 implementation of the `ui.h` calls tccrad emits, and links `-lX11`. An LVGL build compiles the vendored LVGL 9.4 sources in `third_party/lvgl` into `third_party/lvgl-cache` and reuses those objects (X11 window, `-lX11 -lpthread -lm`). The window keeps the desktop pointer, and a resize keeps the pixels that are still on screen instead of clearing the frame. `TCCRAD_LVGL` can point at another directory that contains `lvgl.h` and `src/`.
 
 `TCCRAD_HOME` overrides the directory used to find `runtime/`, `third_party/`, and `style/`. Otherwise the designer uses the directory that contains the executable, or its parent when the executable lives in `build/`.
 
@@ -43,7 +47,9 @@ make tcc          # the designer, compiled by tcc
 
 File, Edit, Layout, View, Build, Help are in the top bar. The palette adds a widget under the selection (or under the nearest container that can hold it). The tree and the canvas both select. Properties and events are on the right. Negative `w` or `h` is the gap from the right or bottom edge.
 
-View opens the struct wizard, configurations, the style editor, and a code preview. Build writes `out/` next to the saved file (or `/tmp/tccrad-<pid>` when the document has no path) and can start the program. Ctrl+S saves, Ctrl+O opens, Ctrl+Z / Ctrl+Y undo and redo, Ctrl+B builds and runs, Delete removes the selection when a text field is not active.
+View opens the struct wizard, configurations, the style editor, Code, and Explore. Code lists the generated routines beside the source, with line numbers, and Find next jumps to a match. The routine that contains the first visible line stays selected, and `(declarations)` is the text above the first routine. Explore lists the form, its widgets, and those routines. A click shows the detail. Clicking the same row again, or Open, shows a widget on the form or opens a routine at its line. F4 opens Explore. Build writes `out/` next to the saved file (or `/tmp/tccrad-<pid>` when the document has no path) and can start the program. Ctrl+S saves, Ctrl+O opens, Ctrl+Z / Ctrl+Y undo and redo, Ctrl+B builds and runs, Delete removes the selection when a text field is not active.
+
+The − and + on the menu bar change how large the designer is drawn, from 100% to 300%, in steps of 25. View has the same two commands. Ctrl+Minus and Ctrl+Plus do it from the keyboard, and Ctrl+0 returns to 100%. The choice is saved under the user config directory (`$XDG_CONFIG_HOME/tccrad/ui_scale`, or `~/.config/tccrad/ui_scale`). A desktop taller than 1080 pixels, or an Xft DPI above 96, starts above 100% so the text is not a 13px bitmap. That percentage sizes only the designer. A form keeps its own pixels or dialog units.
 
 Save produces a `.c` file whose `/* @tccrad-doc */` block is the widget tree, plus a matching `.h`. Edit only inside `@tccrad user` regions if you want the designer to keep your text. On reload, those regions win over the copy stored in the document block. If the file changes on disk and you have no local edits, it reloads.
 
@@ -71,6 +77,7 @@ src/            designer
 runtime/tccrad.h
 third_party/    Nuklear, its X11 backend, LVGL 9.4, and the libui stand-in
 docs/           screenshots for this page
+examples/       bench.c, a form you can open and build
 style/          color tables
 tests/          round-trip test and libui/LVGL stubs
 ```

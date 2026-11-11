@@ -11,6 +11,9 @@
 #if LV_USE_X11
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -32,6 +35,10 @@
     #define LV_X11_RENDER_MODE LV_DISPLAY_RENDER_MODE_FULL
 #endif
 
+#ifndef LV_X11_HIDE_CURSOR
+    #define LV_X11_HIDE_CURSOR 0
+#endif
+
 /**********************
  *      TYPEDEFS
  **********************/
@@ -51,6 +58,7 @@ typedef struct {
     lv_timer_t   *  timer;           /**< timer object for @ref x11_event_handler */
     uint8_t    *    buffer[2];       /**< (double) lv display buffers, depending on @ref LV_X11_RENDER_MODE */
     lv_area_t       flush_area;      /**< integrated area for a display update */
+    size_t          buf_sz;          /**< bytes currently allocated for each draw buffer */
     /* systemtick by thread related information */
     pthread_t       thr_tick;        /**< pthread for SysTick simulation */
     bool            terminated;      /**< flag to germinate SysTick simulation thread */
@@ -149,14 +157,74 @@ static void x11_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * 
         /* refresh collected display update area only */
         int16_t upd_w = xd->flush_area.x2 - xd->flush_area.x1 + 1;
         int16_t upd_h = xd->flush_area.y2 - xd->flush_area.y1 + 1;
-        XPutImage(xd->hdr.display, xd->window, xd->gc, xd->ximage, xd->flush_area.x1, xd->flush_area.y1, xd->flush_area.x1,
-                  xd->flush_area.y1, upd_w, upd_h);
+        if(xd->ximage && upd_w > 0 && upd_h > 0
+           && xd->flush_area.x1 >= 0 && xd->flush_area.y1 >= 0
+           && xd->flush_area.x1 + upd_w <= xd->ximage->width
+           && xd->flush_area.y1 + upd_h <= xd->ximage->height) {
+            XPutImage(xd->hdr.display, xd->window, xd->gc, xd->ximage, xd->flush_area.x1, xd->flush_area.y1,
+                      xd->flush_area.x1, xd->flush_area.y1, upd_w, upd_h);
+            XFlush(xd->hdr.display);
+        }
 
         /* invalidate collected area */
         xd->flush_area = inv_area;
     }
     /* Inform the graphics library that you are ready with the flushing */
     lv_display_flush_ready(disp);
+}
+
+/**
+ * Replace the cached XImage, copying the rectangle that still overlaps.
+ * New margins are cleared. The previous image is destroyed only after the copy.
+ */
+static void x11_replace_image(x11_disp_data_t * xd, int32_t hor_res, int32_t ver_res)
+{
+    XImage * old = xd->ximage;
+    size_t px;
+    size_t sz;
+    char * data;
+    XImage * img;
+    int copy_w;
+    int copy_h;
+    int y;
+    int bpp = (int)sizeof(lv_color32_t);
+
+    if(!xd || hor_res < 1 || ver_res < 1 || !xd->hdr.display || !xd->visual) return;
+    if((size_t)hor_res > SIZE_MAX / (size_t)ver_res) return;
+    px = (size_t)hor_res * (size_t)ver_res;
+    if(px > SIZE_MAX / sizeof(lv_color32_t)) return;
+    sz = px * sizeof(lv_color32_t);
+    data = malloc(sz);
+    if(!data) return;
+    memset(data, 0, sz);
+    img = XCreateImage(xd->hdr.display, xd->visual, xd->dplanes, ZPixmap, 0, data,
+                       (unsigned)hor_res, (unsigned)ver_res,
+                       lv_color_format_get_bpp(LV_COLOR_FORMAT_ARGB8888), 0);
+    if(!img || img->bytes_per_line < hor_res * bpp
+       || (size_t)img->bytes_per_line * (size_t)img->height > sz) {
+        if(img) {
+            img->data = NULL;
+            XDestroyImage(img);
+        }
+        free(data);
+        return;
+    }
+    if(old && old->data && old->width > 0 && old->height > 0 && old->bytes_per_line > 0) {
+        copy_w = old->width < hor_res ? old->width : hor_res;
+        copy_h = old->height < ver_res ? old->height : ver_res;
+        if((size_t)copy_w * (size_t)bpp > (size_t)img->bytes_per_line)
+            copy_w = img->bytes_per_line / bpp;
+        if((size_t)copy_w * (size_t)bpp > (size_t)old->bytes_per_line)
+            copy_w = old->bytes_per_line / bpp;
+        for(y = 0; y < copy_h && copy_w > 0; y++) {
+            memcpy(data + (size_t)y * (size_t)img->bytes_per_line,
+                   (char *)old->data + (size_t)y * (size_t)old->bytes_per_line,
+                   (size_t)copy_w * (size_t)bpp);
+        }
+    }
+    if(old) XDestroyImage(old);
+    xd->ximage = img;
+    xd->xdata = data;
 }
 
 /**
@@ -172,20 +240,36 @@ static void x11_resolution_evt_cb(lv_event_t * e)
     int32_t hor_res = lv_display_get_horizontal_resolution(disp);
     int32_t ver_res = lv_display_get_vertical_resolution(disp);
 
-    if(LV_X11_RENDER_MODE != LV_DISPLAY_RENDER_MODE_PARTIAL) {
-        /* update lvgl full-screen display draw buffers for new display size */
-        int sz_buffers = (hor_res * ver_res * (LV_COLOR_DEPTH + 7) / 8);
-        xd->buffer[0] = realloc(xd->buffer[0], sz_buffers);
-        xd->buffer[1] = (LV_X11_DOUBLE_BUFFER ?  realloc(xd->buffer[1], sz_buffers) : NULL);
-        lv_display_set_buffers(disp, xd->buffer[0], xd->buffer[1], sz_buffers, LV_X11_RENDER_MODE);
+    if(hor_res > 0 && ver_res > 0) {
+        size_t px;
+        size_t bpp = (size_t)((LV_COLOR_DEPTH + 7) / 8);
+        size_t sz_buffers;
+        size_t row;
+        if((size_t)hor_res > SIZE_MAX / (size_t)ver_res) return;
+        px = (size_t)hor_res * (size_t)ver_res;
+        if(bpp == 0 || px > SIZE_MAX / bpp) return;
+        sz_buffers = px * bpp;
+        row = (size_t)hor_res * bpp;
+        uint8_t * b0;
+        uint8_t * b1;
+        if(LV_X11_RENDER_MODE == LV_DISPLAY_RENDER_MODE_PARTIAL) sz_buffers /= 10;
+        if(sz_buffers < row) sz_buffers = row;
+        if(sz_buffers <= UINT32_MAX) {
+            b0 = realloc(xd->buffer[0], sz_buffers);
+            b1 = xd->buffer[1];
+            if(LV_X11_DOUBLE_BUFFER) b1 = realloc(xd->buffer[1], sz_buffers);
+            if(b0 && (!LV_X11_DOUBLE_BUFFER || b1)) {
+                xd->buffer[0] = b0;
+                xd->buffer[1] = b1;
+                xd->buf_sz = sz_buffers;
+                lv_display_set_buffers(disp, xd->buffer[0], xd->buffer[1], (uint32_t)sz_buffers, LV_X11_RENDER_MODE);
+            }
+        }
     }
 
-    /* re-create cache image with new size */
-    XDestroyImage(xd->ximage);
-    size_t sz_buffers = hor_res * ver_res * sizeof(lv_color32_t);
-    xd->xdata = malloc(sz_buffers); /* use clib method here, x11 memory not part of device footprint */
-    xd->ximage = XCreateImage(xd->hdr.display, xd->visual, xd->dplanes, ZPixmap, 0, xd->xdata,
-                              hor_res, ver_res, lv_color_format_get_bpp(LV_COLOR_FORMAT_ARGB8888), 0);
+    /* Keep the pixels that still fit. A fresh uninitialized image is what
+       flashes through the window while the new size is painted. */
+    x11_replace_image(xd, hor_res, ver_res);
 }
 
 /**
@@ -219,6 +303,7 @@ static void x11_disp_delete_evt_cb(lv_event_t * e)
 #endif
 }
 
+#if LV_X11_HIDE_CURSOR
 static void x11_hide_cursor(lv_display_t * disp)
 {
     x11_disp_data_t * xd = lv_display_get_driver_data(disp);
@@ -233,6 +318,7 @@ static void x11_hide_cursor(lv_display_t * disp)
     XFreeCursor(xd->hdr.display, inv_cursor);
     XFreePixmap(xd->hdr.display, empty_bitmap);
 }
+#endif
 
 /**
  * X11 input event handler, predicated to fetch and handle only display related events
@@ -258,8 +344,28 @@ static void x11_event_handler(lv_timer_t * t)
         LV_LOG_TRACE("Display Event %d", event.type);
         switch(event.type) {
             case Expose:
-                if(event.xexpose.count == 0) {
-                    XPutImage(xd->hdr.display, xd->window, xd->gc, xd->ximage, 0, 0, 0, 0, event.xexpose.width, event.xexpose.height);
+                if(event.xexpose.count == 0 && xd->ximage) {
+                    int x = event.xexpose.x;
+                    int y = event.xexpose.y;
+                    int w = event.xexpose.width;
+                    int h = event.xexpose.height;
+                    if(x < 0) {
+                        w += x;
+                        x = 0;
+                    }
+                    if(y < 0) {
+                        h += y;
+                        y = 0;
+                    }
+                    if(x < xd->ximage->width && y < xd->ximage->height && w > 0 && h > 0) {
+                        if(x + w > xd->ximage->width) w = xd->ximage->width - x;
+                        if(y + h > xd->ximage->height) h = xd->ximage->height - y;
+                        if(w > 0 && h > 0) {
+                            XPutImage(xd->hdr.display, xd->window, xd->gc, xd->ximage, x, y, x, y, (unsigned)w,
+                                      (unsigned)h);
+                            XFlush(xd->hdr.display);
+                        }
+                    }
                 }
                 break;
             case ConfigureNotify:
@@ -329,6 +435,15 @@ static void x11_window_create(lv_display_t * disp, char const * title)
     XSetStandardProperties(xd->hdr.display, xd->window, title, NULL, None, NULL, 0, NULL);
     xd->gc = XCreateGC(xd->hdr.display, xd->window, 0, 0);
 
+    /* Keep existing bits in the top-left on resize. ForgetGravity clears the
+       whole window first, which is the flash while the frame is redrawn. */
+    {
+        XSetWindowAttributes attr;
+        attr.background_pixel = BlackPixel(xd->hdr.display, screen);
+        attr.bit_gravity = NorthWestGravity;
+        XChangeWindowAttributes(xd->hdr.display, xd->window, CWBackPixel | CWBitGravity, &attr);
+    }
+
     /* allow receiving mouse, keyboard and window change/close events */
     XSelectInput(xd->hdr.display, xd->window,
                  PointerMotionMask | ButtonPressMask | ButtonReleaseMask | KeyPressMask | KeyReleaseMask | ExposureMask |
@@ -336,7 +451,9 @@ static void x11_window_create(lv_display_t * disp, char const * title)
     xd->wmDeleteMessage = XInternAtom(xd->hdr.display, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(xd->hdr.display, xd->window, &xd->wmDeleteMessage, 1);
 
+#if LV_X11_HIDE_CURSOR
     x11_hide_cursor(disp);
+#endif
 
     /* create cache XImage */
     size_t sz_buffers = hor_res * ver_res * sizeof(lv_color32_t);
@@ -381,6 +498,7 @@ lv_display_t * lv_x11_window_create(char const * title, int32_t hor_res, int32_t
     }
     xd->buffer[0] = malloc(sz_buffers);
     xd->buffer[1] = (LV_X11_DOUBLE_BUFFER ? malloc(sz_buffers) : NULL);
+    xd->buf_sz = (size_t)sz_buffers;
     lv_display_set_buffers(disp, xd->buffer[0], xd->buffer[1], sz_buffers, LV_X11_RENDER_MODE);
 
     xd->timer = lv_timer_create(x11_event_handler, 5, disp);

@@ -580,7 +580,10 @@ tr_project_build(const TrDoc *doc, const TrStyle *style, const char *out_dir,
             return -1;
         }
         if (def == 1) {
-            if (push_arg(argv, &argc, cap, "-lX11") != 0 ||
+            if (push_arg(argv, &argc, cap, "-I") != 0 ||
+                push_arg(argv, &argc, cap, "/usr/include/freetype2") != 0 ||
+                push_arg(argv, &argc, cap, "-lX11") != 0 ||
+                push_arg(argv, &argc, cap, "-lXft") != 0 ||
                 push_arg(argv, &argc, cap, "-lm") != 0) {
                 if (log && logcap) tr_copy_cap(log, logcap, "could not assemble the compiler command");
                 return -1;

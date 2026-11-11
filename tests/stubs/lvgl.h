@@ -10,6 +10,7 @@ typedef struct { uint8_t unused; } lv_color_t;
 #define LV_EVENT_VALUE_CHANGED 2
 #define LV_STATE_CHECKED 1
 #define LV_ANIM_OFF 0
+#define LV_SIZE_CONTENT (-1)
 #define LV_FLEX_FLOW_COLUMN 0
 #define LV_FLEX_FLOW_ROW 1
 lv_obj_t *lv_obj_create(lv_obj_t *parent);
@@ -23,6 +24,7 @@ int lv_obj_has_state(const lv_obj_t *o, int state);
 void lv_obj_add_event_cb(lv_obj_t *o, void (*cb)(lv_event_t *), int filter, void *ud);
 void lv_obj_set_style_bg_color(lv_obj_t *o, lv_color_t c, int sel);
 lv_color_t lv_color_hex(unsigned hex);
+lv_color_t lv_color_make(uint8_t r, uint8_t g, uint8_t b);
 int lv_pct(int v);
 lv_obj_t *lv_label_create(lv_obj_t *parent);
 void lv_label_set_text(lv_obj_t *o, const char *t);
@@ -51,6 +53,7 @@ void lv_table_set_row_count(lv_obj_t *o, uint32_t n);
 void lv_table_set_cell_value(lv_obj_t *o, uint32_t row, uint32_t col, const char *t);
 lv_obj_t *lv_tabview_create(lv_obj_t *parent);
 lv_obj_t *lv_tabview_add_tab(lv_obj_t *tv, const char *name);
+uint32_t lv_tabview_get_tab_active(const lv_obj_t *tv);
 lv_obj_t *lv_image_create(lv_obj_t *parent);
 void lv_image_set_src(lv_obj_t *o, const char *src);
 lv_obj_t *lv_layer_top(void);

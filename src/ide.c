@@ -5,6 +5,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,6 +71,231 @@ ide_set_status(Ide *ide, const char *msg)
     tr_copy_cap(ide->status, sizeof ide->status, msg ? msg : "");
 }
 
+static int
+ide_id_char(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '_';
+}
+
+static int
+ide_ascii_fold(char c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A' + 'a';
+    return (unsigned char)c;
+}
+
+int
+ide_routine_name(const char *line, char *dst, size_t cap)
+{
+    const char *paren;
+    const char *s;
+    size_t n;
+    if (!dst || cap < 2) return 0;
+    dst[0] = '\0';
+    if (!line || line[0] == '\0' || line[0] == ' ' || line[0] == '\t' ||
+        line[0] == '#' || line[0] == '/' || line[0] == '*')
+        return 0;
+    paren = strchr(line, '(');
+    if (!paren || paren == line) return 0;
+    s = paren;
+    while (s > line && ide_id_char(s[-1])) s--;
+    if (s == paren) return 0;
+    n = (size_t)(paren - s);
+    if (n >= cap) return 0;
+    if ((n == 2 && memcmp(s, "if", 2) == 0) ||
+        (n == 3 && memcmp(s, "for", 3) == 0) ||
+        (n == 5 && memcmp(s, "while", 5) == 0) ||
+        (n == 6 && (memcmp(s, "switch", 6) == 0 || memcmp(s, "return", 6) == 0)) ||
+        (n == 6 && memcmp(s, "sizeof", 6) == 0))
+        return 0;
+    memcpy(dst, s, n);
+    dst[n] = '\0';
+    return 1;
+}
+
+int
+ide_routine_index(const int *lines, int n, int at)
+{
+    int i;
+    int found = -1;
+    if (!lines || n <= 0) return -1;
+    for (i = 0; i < n; i++) {
+        if (lines[i] <= at) found = i;
+        else break;
+    }
+    return found;
+}
+
+int
+ide_find_line(const char *text, const char *needle, int start)
+{
+    const char *p;
+    size_t nlen;
+    int line = 0;
+    if (!text || !needle || needle[0] == '\0' || start < 0) return -1;
+    nlen = strlen(needle);
+    if (nlen > 200) return -1;
+    p = text;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        size_t len = eol ? (size_t)(eol - p) : strlen(p);
+        if (line >= start && len >= nlen) {
+            size_t i;
+            for (i = 0; i + nlen <= len; i++) {
+                if (memcmp(p + i, needle, nlen) == 0) return line;
+            }
+        }
+        if (!eol) break;
+        p = eol + 1;
+        line++;
+        if (line > 100000) break;
+    }
+    return -1;
+}
+
+int
+ide_text_has(const char *hay, const char *needle)
+{
+    size_t nlen;
+    size_t i;
+    size_t hlen;
+    if (!needle || needle[0] == '\0') return 1;
+    if (!hay) return 0;
+    nlen = strlen(needle);
+    hlen = strlen(hay);
+    if (nlen > hlen) return 0;
+    for (i = 0; i + nlen <= hlen; i++) {
+        size_t k;
+        for (k = 0; k < nlen; k++) {
+            if (ide_ascii_fold(hay[i + k]) != ide_ascii_fold(needle[k])) break;
+        }
+        if (k == nlen) return 1;
+    }
+    return 0;
+}
+
+int
+ide_ui_clamp(int pct)
+{
+    if (pct < 100) pct = 100;
+    if (pct > 300) pct = 300;
+    pct = ((pct + 12) / 25) * 25;
+    if (pct < 100) pct = 100;
+    if (pct > 300) pct = 300;
+    return pct;
+}
+
+int
+ide_ui_default_pct(int screen_h, int dpi)
+{
+    int from_h = 100;
+    int from_dpi = 100;
+    int pct;
+    if (screen_h > 2520) screen_h = 2520;
+    if (screen_h > 1080)
+        from_h = 100 + (screen_h - 1080) * 50 / 360;
+    if (dpi > 400) dpi = 400;
+    if (dpi > 96)
+        from_dpi = dpi * 100 / 96;
+    pct = from_h > from_dpi ? from_h : from_dpi;
+    return ide_ui_clamp(pct);
+}
+
+static int
+ui_config_dir(char *dst, size_t cap, int make)
+{
+    const char *xdg = getenv("XDG_CONFIG_HOME");
+    const char *home = getenv("HOME");
+    char base[TR_PATH_MAX];
+    if (xdg && xdg[0] != '\0') {
+        if (tr_copy_cap(base, sizeof base, xdg) != 0) return -1;
+    } else if (home && home[0] != '\0') {
+        if (tr_path_join(base, sizeof base, home, ".config") != 0) return -1;
+    } else {
+        return -1;
+    }
+    if (tr_path_join(dst, cap, base, "tccrad") != 0) return -1;
+    if (make && mkdir(dst, 0700) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+static int
+ui_scale_read(void)
+{
+    char dir[TR_PATH_MAX];
+    char path[TR_PATH_MAX];
+    char buf[16];
+    ssize_t n;
+    int fd;
+    int v = 0;
+    int any = 0;
+    int i;
+    if (ui_config_dir(dir, sizeof dir, 0) != 0) return -1;
+    if (tr_path_join(path, sizeof path, dir, "ui_scale") != 0) return -1;
+    fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return -1;
+    n = read(fd, buf, sizeof buf - 1);
+    if (close(fd) != 0) return -1;
+    if (n <= 0) return -1;
+    buf[n] = '\0';
+    if (buf[n - 1] == '\n') buf[n - 1] = '\0';
+    for (i = 0; buf[i] != '\0'; i++) {
+        if (buf[i] < '0' || buf[i] > '9') return -1;
+        any = 1;
+        v = v * 10 + (buf[i] - '0');
+        if (v > 300) return -1;
+    }
+    if (!any || v < 100) return -1;
+    return v;
+}
+
+static void
+ui_scale_save(int pct)
+{
+    char dir[TR_PATH_MAX];
+    char path[TR_PATH_MAX];
+    char text[16];
+    int n;
+    if (ui_config_dir(dir, sizeof dir, 1) != 0) return;
+    if (tr_path_join(path, sizeof path, dir, "ui_scale") != 0) return;
+    n = snprintf(text, sizeof text, "%d\n", pct);
+    if (n < 0 || (size_t)n >= sizeof text) return;
+    (void)tr_write_file(path, text, (size_t)n);
+}
+
+void
+ide_ui_load(Ide *ide, int screen_h, int dpi)
+{
+    int saved;
+    if (!ide) return;
+    saved = ui_scale_read();
+    if (saved > 0) ide->ui_pct = ide_ui_clamp(saved);
+    else ide->ui_pct = ide_ui_default_pct(screen_h, dpi);
+}
+
+void
+ide_ui_set(Ide *ide, int pct)
+{
+    char msg[32];
+    int next;
+    int n;
+    if (!ide) return;
+    next = ide_ui_clamp(pct);
+    if (next == ide->ui_pct) return;
+    ide->ui_pct = next;
+    ui_scale_save(next);
+    n = snprintf(msg, sizeof msg, "Display %d%%", next);
+    if (n > 0 && (size_t)n < sizeof msg) ide_set_status(ide, msg);
+}
+
+void
+ide_ui_bump(Ide *ide, int delta)
+{
+    if (!ide) return;
+    ide_ui_set(ide, ide->ui_pct + delta);
+}
+
 Ide *
 ide_new(void)
 {
@@ -97,6 +323,7 @@ ide_new(void)
     }
     tr_copy_cap(ide->browse, sizeof ide->browse, ide->home);
     ide->selected = 1;
+    ide->ui_pct = 100;
     ide->committed = snap(ide->doc);
     ide_set_status(ide, "New App. Add widgets, then Build & Run with TinyCC.");
     return ide;

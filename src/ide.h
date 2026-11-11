@@ -19,6 +19,7 @@ enum {
     IDE_MODAL_OPEN,
     IDE_MODAL_SAVE,
     IDE_MODAL_CODE,
+    IDE_MODAL_EXPLORE,
     IDE_MODAL_FIELDS,
     IDE_MODAL_CONFIG,
     IDE_MODAL_STYLE,
@@ -58,7 +59,11 @@ typedef struct Ide {
     char field_init[TR_TEXT_MAX];
     char config_name[TR_NAME_MAX];
     int code_scroll;
+    char code_find[64];
+    int explore_sel;
+    char explore_filter[48];
     TrBuf preview;
+    int ui_pct;
 } Ide;
 
 Ide *ide_new(void);
@@ -83,5 +88,14 @@ void ide_note_disk(Ide *ide);
 void ide_browse(Ide *ide, const char *dir);
 int ide_visible(const Ide *ide, const TrWidget *w);
 void ide_frame(struct nk_context *ctx, struct Ide *ide, int width, int height);
+int ide_routine_name(const char *line, char *dst, size_t cap);
+int ide_routine_index(const int *lines, int n, int at);
+int ide_find_line(const char *text, const char *needle, int start);
+int ide_text_has(const char *hay, const char *needle);
+int ide_ui_clamp(int pct);
+int ide_ui_default_pct(int screen_h, int dpi);
+void ide_ui_load(Ide *ide, int screen_h, int dpi);
+void ide_ui_set(Ide *ide, int pct);
+void ide_ui_bump(Ide *ide, int delta);
 
 #endif

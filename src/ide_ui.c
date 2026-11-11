@@ -7,6 +7,190 @@
 
 static int nhits;
 static struct { int id; struct nk_rect r; } hits[TR_WIDGETS_MAX];
+static int g_pct = 100;
+static int style_ready;
+static struct nk_style style_base;
+
+static int
+px(int v)
+{
+    long s;
+    if (v <= 0) return v;
+    s = (long)v * (long)g_pct;
+    if (s / (long)v != (long)g_pct) return v;
+    s /= 100L;
+    if (s < 1) s = 1;
+    if (s > 100000L) s = 100000L;
+    return (int)s;
+}
+
+static float
+pxf(int v)
+{
+    return (float)px(v);
+}
+
+static float
+sc(float v, int pct)
+{
+    return v * (float)pct / 100.0f;
+}
+
+static struct nk_vec2
+sc2(struct nk_vec2 v, int pct)
+{
+    v.x = sc(v.x, pct);
+    v.y = sc(v.y, pct);
+    return v;
+}
+
+static void
+scale_button(struct nk_style_button *b, int pct)
+{
+    b->border = sc(b->border, pct);
+    b->rounding = sc(b->rounding, pct);
+    b->padding = sc2(b->padding, pct);
+    b->image_padding = sc2(b->image_padding, pct);
+    b->touch_padding = sc2(b->touch_padding, pct);
+}
+
+static void
+scale_toggle(struct nk_style_toggle *t, int pct)
+{
+    t->padding = sc2(t->padding, pct);
+    t->touch_padding = sc2(t->touch_padding, pct);
+    t->spacing = sc(t->spacing, pct);
+    t->border = sc(t->border, pct);
+}
+
+static void
+scale_scroll(struct nk_style_scrollbar *s, int pct)
+{
+    s->border = sc(s->border, pct);
+    s->rounding = sc(s->rounding, pct);
+    s->border_cursor = sc(s->border_cursor, pct);
+    s->rounding_cursor = sc(s->rounding_cursor, pct);
+    s->padding = sc2(s->padding, pct);
+    scale_button(&s->inc_button, pct);
+    scale_button(&s->dec_button, pct);
+}
+
+static void
+scale_edit(struct nk_style_edit *e, int pct)
+{
+    e->border = sc(e->border, pct);
+    e->rounding = sc(e->rounding, pct);
+    e->cursor_size = sc(e->cursor_size, pct);
+    e->scrollbar_size = sc2(e->scrollbar_size, pct);
+    e->padding = sc2(e->padding, pct);
+    e->row_padding = sc(e->row_padding, pct);
+    scale_scroll(&e->scrollbar, pct);
+}
+
+static void
+scale_style(struct nk_style *s, int pct)
+{
+    struct nk_style_window *w = &s->window;
+    if (pct == 100) return;
+    s->text.padding = sc2(s->text.padding, pct);
+    s->link.underline_thickness = sc(s->link.underline_thickness, pct);
+    s->link.padding = sc2(s->link.padding, pct);
+    s->link.touch_padding = sc2(s->link.touch_padding, pct);
+    scale_button(&s->button, pct);
+    scale_button(&s->contextual_button, pct);
+    scale_button(&s->menu_button, pct);
+    scale_toggle(&s->option, pct);
+    scale_toggle(&s->checkbox, pct);
+    s->selectable.rounding = sc(s->selectable.rounding, pct);
+    s->selectable.padding = sc2(s->selectable.padding, pct);
+    s->selectable.touch_padding = sc2(s->selectable.touch_padding, pct);
+    s->selectable.image_padding = sc2(s->selectable.image_padding, pct);
+    s->slider.border = sc(s->slider.border, pct);
+    s->slider.rounding = sc(s->slider.rounding, pct);
+    s->slider.bar_height = sc(s->slider.bar_height, pct);
+    s->slider.padding = sc2(s->slider.padding, pct);
+    s->slider.spacing = sc2(s->slider.spacing, pct);
+    s->slider.cursor_size = sc2(s->slider.cursor_size, pct);
+    scale_button(&s->slider.inc_button, pct);
+    scale_button(&s->slider.dec_button, pct);
+    s->knob.border = sc(s->knob.border, pct);
+    s->knob.knob_border = sc(s->knob.knob_border, pct);
+    s->knob.padding = sc2(s->knob.padding, pct);
+    s->knob.spacing = sc2(s->knob.spacing, pct);
+    s->knob.cursor_width = sc(s->knob.cursor_width, pct);
+    s->progress.rounding = sc(s->progress.rounding, pct);
+    s->progress.border = sc(s->progress.border, pct);
+    s->progress.cursor_border = sc(s->progress.cursor_border, pct);
+    s->progress.cursor_rounding = sc(s->progress.cursor_rounding, pct);
+    s->progress.padding = sc2(s->progress.padding, pct);
+    s->property.border = sc(s->property.border, pct);
+    s->property.rounding = sc(s->property.rounding, pct);
+    s->property.padding = sc2(s->property.padding, pct);
+    scale_edit(&s->property.edit, pct);
+    scale_button(&s->property.inc_button, pct);
+    scale_button(&s->property.dec_button, pct);
+    scale_edit(&s->edit, pct);
+    s->chart.border = sc(s->chart.border, pct);
+    s->chart.rounding = sc(s->chart.rounding, pct);
+    s->chart.padding = sc2(s->chart.padding, pct);
+    scale_scroll(&s->scrollh, pct);
+    scale_scroll(&s->scrollv, pct);
+    s->tab.border = sc(s->tab.border, pct);
+    s->tab.rounding = sc(s->tab.rounding, pct);
+    s->tab.indent = sc(s->tab.indent, pct);
+    s->tab.padding = sc2(s->tab.padding, pct);
+    s->tab.spacing = sc2(s->tab.spacing, pct);
+    scale_button(&s->tab.tab_maximize_button, pct);
+    scale_button(&s->tab.tab_minimize_button, pct);
+    scale_button(&s->tab.node_maximize_button, pct);
+    scale_button(&s->tab.node_minimize_button, pct);
+    s->combo.border = sc(s->combo.border, pct);
+    s->combo.rounding = sc(s->combo.rounding, pct);
+    s->combo.content_padding = sc2(s->combo.content_padding, pct);
+    s->combo.button_padding = sc2(s->combo.button_padding, pct);
+    s->combo.spacing = sc2(s->combo.spacing, pct);
+    scale_button(&s->combo.button, pct);
+    w->border = sc(w->border, pct);
+    w->combo_border = sc(w->combo_border, pct);
+    w->contextual_border = sc(w->contextual_border, pct);
+    w->menu_border = sc(w->menu_border, pct);
+    w->group_border = sc(w->group_border, pct);
+    w->tooltip_border = sc(w->tooltip_border, pct);
+    w->popup_border = sc(w->popup_border, pct);
+    w->min_row_height_padding = sc(w->min_row_height_padding, pct);
+    w->rounding = sc(w->rounding, pct);
+    w->spacing = sc2(w->spacing, pct);
+    w->scrollbar_size = sc2(w->scrollbar_size, pct);
+    w->min_size = sc2(w->min_size, pct);
+    w->padding = sc2(w->padding, pct);
+    w->group_padding = sc2(w->group_padding, pct);
+    w->popup_padding = sc2(w->popup_padding, pct);
+    w->combo_padding = sc2(w->combo_padding, pct);
+    w->contextual_padding = sc2(w->contextual_padding, pct);
+    w->menu_padding = sc2(w->menu_padding, pct);
+    w->tooltip_padding = sc2(w->tooltip_padding, pct);
+    w->header.padding = sc2(w->header.padding, pct);
+    w->header.label_padding = sc2(w->header.label_padding, pct);
+    w->header.spacing = sc2(w->header.spacing, pct);
+    scale_button(&w->header.close_button, pct);
+    scale_button(&w->header.minimize_button, pct);
+}
+
+static void
+prepare_style(struct nk_context *ctx, Ide *ide)
+{
+    const struct nk_user_font *font;
+    int pct = ide && ide->ui_pct > 0 ? ide_ui_clamp(ide->ui_pct) : 100;
+    if (!style_ready) {
+        style_base = ctx->style;
+        style_ready = 1;
+    }
+    font = ctx->style.font;
+    ctx->style = style_base;
+    scale_style(&ctx->style, pct);
+    ctx->style.font = font;
+    g_pct = pct;
+}
 
 static void
 note_hit(struct nk_context *ctx, int id)
@@ -123,6 +307,8 @@ preview_children(struct nk_context *ctx, Ide *ide, int parent)
     for (r = 0; r < nr; r++) {
         float h = rows[r].height > 0 ? (float)rows[r].height : 28.0f;
         if (rows[r].height < 0) h = 96.0f;
+        h = h * (float)g_pct / 100.0f;
+        if (h < 1.0f) h = 1.0f;
         nk_layout_row_dynamic(ctx, h, rows[r].n > 0 ? rows[r].n : 1);
         for (c = 0; c < rows[r].n; c++)
             preview_one(ctx, ide, &ide->doc->widgets[rows[r].at[c]]);
@@ -142,7 +328,7 @@ draw_tree(struct nk_context *ctx, Ide *ide, int parent, int depth)
         int pad = depth * 2;
         if (pad > 12) pad = 12;
         snprintf(line, sizeof line, "%*s%s %s", pad, "", tr_kind_name(w->kind), w->name);
-        nk_layout_row_dynamic(ctx, 22, 1);
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         if (nk_select_label(ctx, line, NK_TEXT_LEFT, w->id == ide->selected))
             ide_select(ide, w->id);
         if (tr_kind_is_container(w->kind)) draw_tree(ctx, ide, w->id, depth + 1);
@@ -155,42 +341,42 @@ prop_editor(struct nk_context *ctx, Ide *ide, TrWidget *w)
     int n = 0;
     int i;
     const TrPropDef *defs = tr_prop_defs(w->kind, &n);
-    nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_dynamic(ctx, pxf(22), 1);
     nk_label(ctx, tr_kind_name(w->kind), NK_TEXT_LEFT);
-    nk_layout_row_dynamic(ctx, 24, 2);
+    nk_layout_row_dynamic(ctx, pxf(24), 2);
     nk_label(ctx, "name", NK_TEXT_LEFT);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, w->name, TR_NAME_MAX, nk_filter_default);
-    nk_layout_row_dynamic(ctx, 24, 2);
+    nk_layout_row_dynamic(ctx, pxf(24), 2);
     nk_label(ctx, "newline", NK_TEXT_LEFT);
     nk_checkbox_label(ctx, "", &w->newline);
-    nk_layout_row_dynamic(ctx, 24, 1);
+    nk_layout_row_dynamic(ctx, pxf(24), 1);
     w->stretch = nk_propertyi(ctx, "stretch", 0, w->stretch, 20, 1, 1.0f);
-    nk_layout_row_dynamic(ctx, 24, 2);
+    nk_layout_row_dynamic(ctx, pxf(24), 2);
     w->x = nk_propertyi(ctx, "x", -2000, w->x, 4000, 1, 1.0f);
     w->y = nk_propertyi(ctx, "y", -2000, w->y, 4000, 1, 1.0f);
     w->w = nk_propertyi(ctx, "w", -2000, w->w, 4000, 1, 1.0f);
     w->h = nk_propertyi(ctx, "h", -2000, w->h, 4000, 1, 1.0f);
-    nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_dynamic(ctx, pxf(22), 1);
     nk_checkbox_label(ctx, "overlay", &w->overlay);
     w->anchor = nk_propertyi(ctx, "anchor 0-3", 0, w->anchor, 3, 1, 1.0f);
-    nk_layout_row_dynamic(ctx, 24, 2);
+    nk_layout_row_dynamic(ctx, pxf(24), 2);
     nk_label(ctx, "config", NK_TEXT_LEFT);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, w->config, TR_NAME_MAX, nk_filter_default);
     for (i = 0; i < n; i++) {
         TrProp *p = tr_prop_mut(w, defs[i].key);
         int as_int;
         if (!p) continue;
-        nk_layout_row_dynamic(ctx, 18, 1);
+        nk_layout_row_dynamic(ctx, pxf(18), 1);
         nk_label(ctx, defs[i].key, NK_TEXT_LEFT);
         if (defs[i].val == TR_VAL_BOOL) {
             int on = tr_prop_int(w, defs[i].key, 0) ? 1 : 0;
             int before = on;
-            nk_layout_row_dynamic(ctx, 22, 1);
+            nk_layout_row_dynamic(ctx, pxf(22), 1);
             nk_checkbox_label(ctx, "on", &on);
             if (on != before) tr_prop_set(w, defs[i].key, on ? "1" : "0");
         } else if (defs[i].val == TR_VAL_INT) {
             as_int = tr_prop_int(w, defs[i].key, 0);
-            nk_layout_row_dynamic(ctx, 24, 1);
+            nk_layout_row_dynamic(ctx, pxf(24), 1);
             as_int = nk_propertyi(ctx, "#", -100000, as_int, 100000, 1, 1.0f);
             {
                 char tmp[32];
@@ -198,11 +384,11 @@ prop_editor(struct nk_context *ctx, Ide *ide, TrWidget *w)
                 if (strcmp(tmp, p->value) != 0) tr_prop_set(w, defs[i].key, tmp);
             }
         } else {
-            nk_layout_row_dynamic(ctx, 24, 1);
+            nk_layout_row_dynamic(ctx, pxf(24), 1);
             nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, p->value, TR_TEXT_MAX, nk_filter_default);
         }
         if (defs[i].bindable) {
-            nk_layout_row_dynamic(ctx, 22, 2);
+            nk_layout_row_dynamic(ctx, pxf(22), 2);
             nk_label(ctx, "bind", NK_TEXT_LEFT);
             nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, p->bind, TR_EXPR_MAX, nk_filter_default);
             if (defs[i].twoway_ok) nk_checkbox_label(ctx, "two-way", &p->twoway);
@@ -216,8 +402,8 @@ prop_editor(struct nk_context *ctx, Ide *ide, TrWidget *w)
         int cur = 0;
         int k;
         for (k = 0; k < 5; k++) if (values[k] == w->kind) cur = k;
-        nk_layout_row_dynamic(ctx, 24, 1);
-        cur = nk_combo(ctx, kinds, 5, cur, 22, nk_vec2(180, 140));
+        nk_layout_row_dynamic(ctx, pxf(24), 1);
+        cur = nk_combo(ctx, kinds, 5, cur, px(22), nk_vec2((float)px(180), (float)px(140)));
         if (cur >= 0 && cur < 5 && values[cur] != w->kind) tr_doc_set_root_kind(ide->doc, values[cur]);
     }
 }
@@ -227,19 +413,19 @@ event_editor(struct nk_context *ctx, Ide *ide, TrWidget *w)
 {
     int i;
     if (w->nevents <= 0) {
-        nk_layout_row_dynamic(ctx, 22, 1);
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         nk_label(ctx, "no events", NK_TEXT_LEFT);
         return;
     }
     if (ide->body_ev < 0 || ide->body_ev >= w->nevents) ide->body_ev = 0;
-    nk_layout_row_dynamic(ctx, 22, w->nevents > 3 ? 3 : w->nevents);
+    nk_layout_row_dynamic(ctx, pxf(22), w->nevents > 3 ? 3 : w->nevents);
     for (i = 0; i < w->nevents; i++) {
         if (nk_select_label(ctx, w->events[i].name, NK_TEXT_CENTERED, i == ide->body_ev)) {
             if (ide->body_ev != i) ide->body_id = 0;
             ide->body_ev = i;
         }
     }
-    nk_layout_row_dynamic(ctx, 24, 1);
+    nk_layout_row_dynamic(ctx, pxf(24), 1);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, w->events[ide->body_ev].handler,
         TR_NAME_MAX, nk_filter_default);
     if (ide->body_id != w->id || ide->body_ev < 0) {
@@ -248,7 +434,7 @@ event_editor(struct nk_context *ctx, Ide *ide, TrWidget *w)
         ide->body_len = (int)strlen(ide->body);
         ide->body_id = w->id;
     }
-    nk_layout_row_dynamic(ctx, 120, 1);
+    nk_layout_row_dynamic(ctx, pxf(120), 1);
     nk_edit_string(ctx, NK_EDIT_BOX, ide->body, &ide->body_len, IDE_BODY, nk_filter_default);
     if (ide->body_len < 0) ide->body_len = 0;
     if (ide->body_len >= IDE_BODY) ide->body_len = IDE_BODY - 1;
@@ -266,11 +452,13 @@ panel(struct nk_context *ctx, const char *name, struct nk_rect r, nk_flags flags
 static void
 draw_toolbar(struct nk_context *ctx, Ide *ide)
 {
+    char zoom[16];
+    int zn;
     nk_menubar_begin(ctx);
-    nk_layout_row_begin(ctx, NK_STATIC, 22, 6);
-    nk_layout_row_push(ctx, 50);
-    if (nk_menu_begin_label(ctx, "File", NK_TEXT_LEFT, nk_vec2(160, 200))) {
-        nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_begin(ctx, NK_STATIC, (float)px(22), 9);
+    nk_layout_row_push(ctx, (float)px(50));
+    if (nk_menu_begin_label(ctx, "File", NK_TEXT_LEFT, nk_vec2((float)px(160), (float)px(200)))) {
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         if (nk_menu_item_label(ctx, "New", NK_TEXT_LEFT)) ide_blank(ide);
         if (nk_menu_item_label(ctx, "Open", NK_TEXT_LEFT)) {
             ide->modal = IDE_MODAL_OPEN;
@@ -285,9 +473,9 @@ draw_toolbar(struct nk_context *ctx, Ide *ide)
         if (nk_menu_item_label(ctx, "Quit", NK_TEXT_LEFT)) ide->modal = -1;
         nk_menu_end(ctx);
     }
-    nk_layout_row_push(ctx, 50);
-    if (nk_menu_begin_label(ctx, "Edit", NK_TEXT_LEFT, nk_vec2(160, 220))) {
-        nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_push(ctx, (float)px(50));
+    if (nk_menu_begin_label(ctx, "Edit", NK_TEXT_LEFT, nk_vec2((float)px(160), (float)px(220)))) {
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         if (nk_menu_item_label(ctx, "Undo", NK_TEXT_LEFT)) ide_undo(ide);
         if (nk_menu_item_label(ctx, "Redo", NK_TEXT_LEFT)) ide_redo(ide);
         if (nk_menu_item_label(ctx, "Duplicate", NK_TEXT_LEFT)) ide_duplicate(ide);
@@ -296,28 +484,31 @@ draw_toolbar(struct nk_context *ctx, Ide *ide)
         if (nk_menu_item_label(ctx, "Move down", NK_TEXT_LEFT)) ide_move(ide, 1);
         nk_menu_end(ctx);
     }
-    nk_layout_row_push(ctx, 70);
-    if (nk_menu_begin_label(ctx, "Layout", NK_TEXT_LEFT, nk_vec2(180, 160))) {
+    nk_layout_row_push(ctx, (float)px(70));
+    if (nk_menu_begin_label(ctx, "Layout", NK_TEXT_LEFT, nk_vec2((float)px(180), (float)px(160)))) {
         TrWidget *w = tr_doc_widget(ide->doc, ide->selected);
-        nk_layout_row_dynamic(ctx, 22, 1);
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         if (w && nk_menu_item_label(ctx, "Same row", NK_TEXT_LEFT)) w->newline = 0;
         if (w && nk_menu_item_label(ctx, "New row", NK_TEXT_LEFT)) w->newline = 1;
         if (w && nk_menu_item_label(ctx, "Stretch", NK_TEXT_LEFT)) w->stretch = w->stretch ? 0 : 1;
         nk_menu_end(ctx);
     }
-    nk_layout_row_push(ctx, 60);
-    if (nk_menu_begin_label(ctx, "View", NK_TEXT_LEFT, nk_vec2(180, 220))) {
-        nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_push(ctx, (float)px(60));
+    if (nk_menu_begin_label(ctx, "View", NK_TEXT_LEFT, nk_vec2((float)px(180), (float)px(340)))) {
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         if (nk_menu_item_label(ctx, "Code", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_CODE;
+        if (nk_menu_item_label(ctx, "Explore", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_EXPLORE;
         if (nk_menu_item_label(ctx, "Fields", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_FIELDS;
         if (nk_menu_item_label(ctx, "Configs", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_CONFIG;
         if (nk_menu_item_label(ctx, "Style", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_STYLE;
         if (nk_menu_item_label(ctx, "All configs", NK_TEXT_LEFT)) ide->show_all_cfg = !ide->show_all_cfg;
+        if (nk_menu_item_label(ctx, "Smaller", NK_TEXT_LEFT)) ide_ui_bump(ide, -25);
+        if (nk_menu_item_label(ctx, "Larger", NK_TEXT_LEFT)) ide_ui_bump(ide, 25);
         nk_menu_end(ctx);
     }
-    nk_layout_row_push(ctx, 70);
-    if (nk_menu_begin_label(ctx, "Build", NK_TEXT_LEFT, nk_vec2(180, 240))) {
-        nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_push(ctx, (float)px(70));
+    if (nk_menu_begin_label(ctx, "Build", NK_TEXT_LEFT, nk_vec2((float)px(180), (float)px(240)))) {
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         if (nk_menu_item_label(ctx, "Nuklear", NK_TEXT_LEFT)) ide_set_backend(ide, TR_BACKEND_NUKLEAR);
         if (nk_menu_item_label(ctx, "libui", NK_TEXT_LEFT)) ide_set_backend(ide, TR_BACKEND_LIBUI);
         if (nk_menu_item_label(ctx, "LVGL", NK_TEXT_LEFT)) ide_set_backend(ide, TR_BACKEND_LVGL);
@@ -326,15 +517,23 @@ draw_toolbar(struct nk_context *ctx, Ide *ide)
         if (nk_menu_item_label(ctx, "Stop", NK_TEXT_LEFT)) ide_stop(ide);
         nk_menu_end(ctx);
     }
-    nk_layout_row_push(ctx, 60);
-    if (nk_menu_begin_label(ctx, "Help", NK_TEXT_LEFT, nk_vec2(140, 80))) {
-        nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_push(ctx, (float)px(60));
+    if (nk_menu_begin_label(ctx, "Help", NK_TEXT_LEFT, nk_vec2((float)px(140), (float)px(80)))) {
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         if (nk_menu_item_label(ctx, "About", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_ABOUT;
         nk_menu_end(ctx);
     }
+    nk_layout_row_push(ctx, (float)px(28));
+    if (nk_button_label(ctx, "-")) ide_ui_bump(ide, -25);
+    nk_layout_row_push(ctx, (float)px(64));
+    zn = snprintf(zoom, sizeof zoom, "%d%%", ide->ui_pct > 0 ? ide->ui_pct : g_pct);
+    if (zn < 0 || (size_t)zn >= sizeof zoom) zoom[0] = '\0';
+    nk_label(ctx, zoom, NK_TEXT_CENTERED);
+    nk_layout_row_push(ctx, (float)px(28));
+    if (nk_button_label(ctx, "+")) ide_ui_bump(ide, 25);
     nk_layout_row_end(ctx);
     nk_menubar_end(ctx);
-    nk_layout_row_dynamic(ctx, 18, 1);
+    nk_layout_row_dynamic(ctx, pxf(18), 1);
     nk_label(ctx, ide->status, NK_TEXT_LEFT);
 }
 
@@ -352,9 +551,9 @@ draw_files(struct nk_context *ctx, Ide *ide)
 {
     int i;
     int save = ide->modal == IDE_MODAL_SAVE;
-    nk_layout_row_dynamic(ctx, 24, 1);
+    nk_layout_row_dynamic(ctx, pxf(24), 1);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->pick, (int)sizeof ide->pick, nk_filter_default);
-    nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_dynamic(ctx, pxf(22), 1);
     for (i = 0; i < ide->nnames; i++) {
         char line[160];
         snprintf(line, sizeof line, "%s%s", ide->name_dir[i] ? "[dir] " : "", ide->names[i]);
@@ -372,7 +571,7 @@ draw_files(struct nk_context *ctx, Ide *ide)
             }
         }
     }
-    nk_layout_row_dynamic(ctx, 28, 2);
+    nk_layout_row_dynamic(ctx, pxf(28), 2);
     if (nk_button_label(ctx, save ? "Save" : "Open")) {
         char full[TR_PATH_MAX];
         int n = snprintf(full, sizeof full, "%s/%s", ide->browse, ide->pick);
@@ -390,23 +589,23 @@ static void
 draw_fields(struct nk_context *ctx, Ide *ide)
 {
     int i;
-    nk_layout_row_dynamic(ctx, 22, 3);
+    nk_layout_row_dynamic(ctx, pxf(22), 3);
     nk_label(ctx, "type", NK_TEXT_LEFT);
     nk_label(ctx, "name", NK_TEXT_LEFT);
     nk_label(ctx, "init", NK_TEXT_LEFT);
     for (i = 0; i < ide->doc->nfields; i++) {
         TrField *f = &ide->doc->fields[i];
-        nk_layout_row_dynamic(ctx, 22, 4);
+        nk_layout_row_dynamic(ctx, pxf(22), 4);
         nk_label(ctx, f->type, NK_TEXT_LEFT);
         nk_label(ctx, f->name, NK_TEXT_LEFT);
         nk_label(ctx, f->init, NK_TEXT_LEFT);
         if (nk_button_label(ctx, "remove")) tr_field_remove(ide->doc, i);
     }
-    nk_layout_row_dynamic(ctx, 24, 3);
+    nk_layout_row_dynamic(ctx, pxf(24), 3);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->field_type, TR_TYPE_MAX, nk_filter_default);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->field_name, TR_NAME_MAX, nk_filter_default);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->field_init, TR_TEXT_MAX, nk_filter_default);
-    nk_layout_row_dynamic(ctx, 26, 2);
+    nk_layout_row_dynamic(ctx, pxf(26), 2);
     if (nk_button_label(ctx, "Add field")) {
         if (ide->field_type[0] == '\0') tr_copy_cap(ide->field_type, sizeof ide->field_type, "int");
         if (tr_field_add(ide->doc, ide->field_type, ide->field_name, ide->field_init) < 0)
@@ -421,15 +620,15 @@ draw_configs(struct nk_context *ctx, Ide *ide)
 {
     int i;
     TrDoc *doc = ide->doc;
-    nk_layout_row_dynamic(ctx, 22, 1);
+    nk_layout_row_dynamic(ctx, pxf(22), 1);
     nk_checkbox_label(ctx, "show every configuration", &ide->show_all_cfg);
     for (i = 0; i < doc->nconfigs; i++) {
         int on = strcmp(doc->configs[i], doc->active_config) == 0;
-        nk_layout_row_dynamic(ctx, 22, 1);
+        nk_layout_row_dynamic(ctx, pxf(22), 1);
         if (nk_select_label(ctx, doc->configs[i], NK_TEXT_LEFT, on))
             tr_copy_cap(doc->active_config, sizeof doc->active_config, doc->configs[i]);
     }
-    nk_layout_row_dynamic(ctx, 24, 2);
+    nk_layout_row_dynamic(ctx, pxf(24), 2);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->config_name, TR_NAME_MAX, nk_filter_default);
     if (nk_button_label(ctx, "Add config") && ide->config_name[0] && doc->nconfigs < TR_CONFIGS_MAX) {
         tr_copy_cap(doc->configs[doc->nconfigs], TR_NAME_MAX, ide->config_name);
@@ -445,13 +644,13 @@ draw_style(struct nk_context *ctx, Ide *ide)
     int i;
     char dir[TR_PATH_MAX];
     char err[128];
-    nk_layout_row_dynamic(ctx, 24, 1);
+    nk_layout_row_dynamic(ctx, pxf(24), 1);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->style.name, TR_STYLE_NAME_MAX, nk_filter_default);
     for (i = 0; i < TR_STYLE_COLORS; i++) {
         int r = ide->style.color[i].r;
         int g = ide->style.color[i].g;
         int b = ide->style.color[i].b;
-        nk_layout_row_dynamic(ctx, 22, 4);
+        nk_layout_row_dynamic(ctx, pxf(22), 4);
         nk_label(ctx, tr_style_color_name(i), NK_TEXT_LEFT);
         r = nk_propertyi(ctx, "r", 0, r, 255, 1, 1.0f);
         g = nk_propertyi(ctx, "g", 0, g, 255, 1, 1.0f);
@@ -461,7 +660,7 @@ draw_style(struct nk_context *ctx, Ide *ide)
         ide->style.color[i].b = (unsigned char)b;
         ide->style.color[i].a = 255;
     }
-    nk_layout_row_dynamic(ctx, 26, 2);
+    nk_layout_row_dynamic(ctx, pxf(26), 2);
     if (nk_button_label(ctx, "Save style")) {
         err[0] = '\0';
         if (tr_path_join(dir, sizeof dir, ide->home, "style") == 0 &&
@@ -474,51 +673,248 @@ draw_style(struct nk_context *ctx, Ide *ide)
 }
 
 static void
-draw_code(struct nk_context *ctx, Ide *ide)
+refresh_preview(Ide *ide)
 {
     TrBuf h;
     char err[160];
-    const char *p;
-    int line = 0;
     err[0] = '\0';
     tr_buf_clear(&ide->preview);
-    if (tr_buf_init(&h) == 0) {
-        if (tr_codegen(ide->doc, &ide->style, "app.h", &h, &ide->preview, err, sizeof err) != 0) {
-            tr_buf_clear(&ide->preview);
-            tr_buf_append_cstr(&ide->preview, err[0] ? err : "codegen failed");
-        }
-        tr_buf_free(&h);
+    if (tr_buf_init(&h) != 0) return;
+    if (tr_codegen(ide->doc, &ide->style, "app.h", &h, &ide->preview, err, sizeof err) != 0) {
+        tr_buf_clear(&ide->preview);
+        tr_buf_append_cstr(&ide->preview, err[0] ? err : "codegen failed");
     }
-    nk_layout_row_dynamic(ctx, 16, 1);
-    p = ide->preview.data ? ide->preview.data : "";
-    while (*p && line < 400) {
-        char row[160];
-        size_t n = 0;
-        while (p[n] && p[n] != '\n' && n + 1 < sizeof row) {
-            row[n] = p[n];
+    tr_buf_free(&h);
+}
+
+static int
+collect_routines(const char *text, char names[][48], int *lines, int max)
+{
+    const char *p = text ? text : "";
+    int line = 0;
+    int n = 0;
+    while (*p && n < max && line < 100000) {
+        char row[180];
+        size_t k = 0;
+        while (p[k] && p[k] != '\n' && k + 1 < sizeof row) {
+            row[k] = p[k];
+            k++;
+        }
+        row[k] = '\0';
+        if (ide_routine_name(row, names[n], 48)) {
+            lines[n] = line;
             n++;
         }
-        row[n] = '\0';
-        if (line >= ide->code_scroll) nk_label(ctx, row, NK_TEXT_LEFT);
-        line++;
-        p += n;
+        p += k;
         if (*p == '\n') p++;
+        line++;
     }
-    nk_layout_row_dynamic(ctx, 24, 3);
+    return n;
+}
+
+static void
+draw_code(struct nk_context *ctx, Ide *ide)
+{
+    char names[48][48];
+    int lines[48];
+    int nrout;
+    int current;
+    int i;
+    const char *p;
+    int line = 0;
+    int shown = 0;
+    refresh_preview(ide);
+    p = ide->preview.data ? ide->preview.data : "";
+    nrout = collect_routines(p, names, lines, 48);
+    current = ide_routine_index(lines, nrout, ide->code_scroll);
+    nk_layout_row_dynamic(ctx, pxf(24), 2);
+    nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->code_find, (int)sizeof ide->code_find, nk_filter_default);
+    if (nk_button_label(ctx, "Find next")) {
+        int at = ide_find_line(p, ide->code_find, ide->code_scroll + 1);
+        if (at < 0) at = ide_find_line(p, ide->code_find, 0);
+        if (at >= 0) ide->code_scroll = at;
+        else ide_set_status(ide, "not found");
+    }
+    nk_layout_row_begin(ctx, NK_STATIC, (float)px(320), 2);
+    nk_layout_row_push(ctx, (float)px(180));
+    if (nk_group_begin(ctx, "routines", NK_WINDOW_BORDER)) {
+        int on = current < 0;
+        nk_layout_row_dynamic(ctx, pxf(20), 1);
+        if (nk_selectable_label(ctx, "(declarations)", NK_TEXT_LEFT, &on) && current < 0)
+            ide->code_scroll = 0;
+        else if (on && current >= 0) ide->code_scroll = 0;
+        for (i = 0; i < nrout; i++) {
+            int sel = i == current;
+            nk_layout_row_dynamic(ctx, pxf(20), 1);
+            if (nk_selectable_label(ctx, names[i], NK_TEXT_LEFT, &sel)) {
+                ide->code_scroll = lines[i];
+            }
+        }
+        nk_group_end(ctx);
+    }
+    nk_layout_row_push(ctx, (float)px(560));
+    if (nk_group_begin(ctx, "source", NK_WINDOW_BORDER)) {
+        p = ide->preview.data ? ide->preview.data : "";
+        line = 0;
+        while (*p && shown < 16 && line < 100000) {
+            char row[140];
+            char gutter[160];
+            size_t k = 0;
+            int nw;
+            while (p[k] && p[k] != '\n' && k + 1 < sizeof row) {
+                row[k] = p[k];
+                k++;
+            }
+            row[k] = '\0';
+            if (line >= ide->code_scroll) {
+                nw = snprintf(gutter, sizeof gutter, "%4d  %s", line + 1, row);
+                if (nw < 0) gutter[0] = '\0';
+                nk_layout_row_dynamic(ctx, pxf(18), 1);
+                nk_label(ctx, gutter, NK_TEXT_LEFT);
+                shown++;
+            }
+            p += k;
+            if (*p == '\n') p++;
+            line++;
+        }
+        nk_group_end(ctx);
+    }
+    nk_layout_row_end(ctx);
+    nk_layout_row_dynamic(ctx, pxf(24), 3);
     if (nk_button_label(ctx, "Up")) if (ide->code_scroll > 0) ide->code_scroll -= 8;
     if (nk_button_label(ctx, "Down")) ide->code_scroll += 8;
+    if (nk_button_label(ctx, "Close")) ide->modal = IDE_MODAL_NONE;
+}
+
+enum { EX_FORM = 1, EX_WIDGET, EX_PROC };
+
+static void
+open_explore(Ide *ide, int kind, int id, int line)
+{
+    if (kind == EX_PROC) {
+        ide->code_scroll = line > 0 ? line : 0;
+        ide->modal = IDE_MODAL_CODE;
+        return;
+    }
+    if (id > 0) ide_select(ide, id);
+    ide->modal = IDE_MODAL_NONE;
+}
+
+static void
+draw_explore(struct nk_context *ctx, Ide *ide)
+{
+    char names[48][48];
+    int lines[48];
+    int nrout;
+    int ids[160];
+    int kinds[160];
+    int lns[160];
+    char labels[160][80];
+    int n = 0;
+    int i;
+    const char *filt = ide->explore_filter;
+    const TrWidget *root;
+    refresh_preview(ide);
+    nrout = collect_routines(ide->preview.data, names, lines, 48);
+    root = ide->doc && ide->doc->nwidgets > 0 ? &ide->doc->widgets[0] : NULL;
+    if (root && n < 160) {
+        char label[80];
+        snprintf(label, sizeof label, "form  %s", root->name);
+        if (ide_text_has(label, filt)) {
+            snprintf(labels[n], sizeof labels[n], "%s", label);
+            kinds[n] = EX_FORM;
+            ids[n] = root->id;
+            lns[n] = 0;
+            n++;
+        }
+    }
+    if (ide->doc) {
+        for (i = 1; i < ide->doc->nwidgets && n < 160; i++) {
+            const TrWidget *w = &ide->doc->widgets[i];
+            char label[80];
+            snprintf(label, sizeof label, "%s  %s", tr_kind_name(w->kind), w->name);
+            if (!ide_text_has(label, filt)) continue;
+            snprintf(labels[n], sizeof labels[n], "%s", label);
+            kinds[n] = EX_WIDGET;
+            ids[n] = w->id;
+            lns[n] = 0;
+            n++;
+        }
+    }
+    for (i = 0; i < nrout && n < 160; i++) {
+        char label[80];
+        snprintf(label, sizeof label, "proc  %s", names[i]);
+        if (!ide_text_has(label, filt)) continue;
+        snprintf(labels[n], sizeof labels[n], "%s", label);
+        kinds[n] = EX_PROC;
+        ids[n] = 0;
+        lns[n] = lines[i];
+        n++;
+    }
+    if (ide->explore_sel >= n) ide->explore_sel = n > 0 ? 0 : -1;
+    nk_layout_row_dynamic(ctx, pxf(24), 1);
+    nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->explore_filter,
+        (int)sizeof ide->explore_filter, nk_filter_default);
+    nk_layout_row_dynamic(ctx, (float)px(260), 1);
+    if (nk_group_begin(ctx, "explore-index", NK_WINDOW_BORDER)) {
+        for (i = 0; i < n; i++) {
+            int on = i == ide->explore_sel;
+            int before = on;
+            nk_layout_row_dynamic(ctx, pxf(20), 1);
+            if (nk_selectable_label(ctx, labels[i], NK_TEXT_LEFT, &on)) {
+                if (before) open_explore(ide, kinds[i], ids[i], lns[i]);
+                else ide->explore_sel = i;
+            }
+        }
+        nk_group_end(ctx);
+    }
+    nk_layout_row_dynamic(ctx, pxf(18), 1);
+    if (ide->explore_sel < 0 || ide->explore_sel >= n) {
+        nk_label(ctx, "Select a form, a widget, or a proc.", NK_TEXT_LEFT);
+    } else if (kinds[ide->explore_sel] == EX_PROC) {
+        char line[80];
+        nk_label(ctx, labels[ide->explore_sel], NK_TEXT_LEFT);
+        snprintf(line, sizeof line, "line %d", lns[ide->explore_sel] + 1);
+        nk_label(ctx, line, NK_TEXT_LEFT);
+        nk_label(ctx, "Click again to open this line.", NK_TEXT_LEFT);
+    } else {
+        const TrWidget *w = tr_doc_widget(ide->doc, ids[ide->explore_sel]);
+        char line[120];
+        int e;
+        if (!w) {
+            nk_label(ctx, "That widget is gone.", NK_TEXT_LEFT);
+        } else {
+            const TrWidget *parent = w->parent > 0 ? tr_doc_widget(ide->doc, w->parent) : NULL;
+            nk_label(ctx, w->name, NK_TEXT_LEFT);
+            snprintf(line, sizeof line, "%s", tr_kind_name(w->kind));
+            nk_label(ctx, line, NK_TEXT_LEFT);
+            if (parent) {
+                snprintf(line, sizeof line, "parent %s", parent->name);
+                nk_label(ctx, line, NK_TEXT_LEFT);
+            }
+            for (e = 0; e < w->nevents; e++) {
+                if (w->events[e].handler[0] == '\0') continue;
+                snprintf(line, sizeof line, "%s = %s", w->events[e].name, w->events[e].handler);
+                nk_label(ctx, line, NK_TEXT_LEFT);
+            }
+            nk_label(ctx, "Click again to show it on the form.", NK_TEXT_LEFT);
+        }
+    }
+    nk_layout_row_dynamic(ctx, pxf(26), 2);
+    if (nk_button_label(ctx, "Open") && ide->explore_sel >= 0 && ide->explore_sel < n)
+        open_explore(ide, kinds[ide->explore_sel], ids[ide->explore_sel], lns[ide->explore_sel]);
     if (nk_button_label(ctx, "Close")) ide->modal = IDE_MODAL_NONE;
 }
 
 static void
 draw_about(struct nk_context *ctx, Ide *ide)
 {
-    nk_layout_row_dynamic(ctx, 18, 1);
+    nk_layout_row_dynamic(ctx, pxf(18), 1);
     nk_label(ctx, "tccrad 0.1.0-alpha.1", NK_TEXT_LEFT);
     nk_label(ctx, "A C RAD studio for Nuklear, libui, and LVGL.", NK_TEXT_LEFT);
     nk_label(ctx, "Designs round-trip through generated C. TinyCC builds and runs them.", NK_TEXT_LEFT);
     nk_label(ctx, "Bounded copies, checked allocation, posix_spawn. No system().", NK_TEXT_LEFT);
-    nk_layout_row_dynamic(ctx, 26, 1);
+    nk_layout_row_dynamic(ctx, pxf(26), 1);
     if (nk_button_label(ctx, "Close")) ide->modal = IDE_MODAL_NONE;
 }
 
@@ -528,10 +924,11 @@ draw_modal(struct nk_context *ctx, Ide *ide, int w, int h)
     struct nk_rect r;
     const char *title = "Dialog";
     if (ide->modal == IDE_MODAL_NONE || ide->modal < 0) return;
-    r = nk_rect(80, 60, (float)w - 160, (float)h - 120);
+    r = nk_rect((float)px(80), (float)px(60), (float)w - (float)px(160), (float)h - (float)px(120));
     if (ide->modal == IDE_MODAL_OPEN) title = "Open";
     if (ide->modal == IDE_MODAL_SAVE) title = "Save";
-    if (ide->modal == IDE_MODAL_CODE) title = "Code preview";
+    if (ide->modal == IDE_MODAL_CODE) title = "Code";
+    if (ide->modal == IDE_MODAL_EXPLORE) title = "Explore";
     if (ide->modal == IDE_MODAL_FIELDS) title = "Struct wizard";
     if (ide->modal == IDE_MODAL_CONFIG) title = "Configurations";
     if (ide->modal == IDE_MODAL_STYLE) title = "Style";
@@ -543,6 +940,7 @@ draw_modal(struct nk_context *ctx, Ide *ide, int w, int h)
     }
     if (ide->modal == IDE_MODAL_OPEN || ide->modal == IDE_MODAL_SAVE) draw_files(ctx, ide);
     else if (ide->modal == IDE_MODAL_CODE) draw_code(ctx, ide);
+    else if (ide->modal == IDE_MODAL_EXPLORE) draw_explore(ctx, ide);
     else if (ide->modal == IDE_MODAL_FIELDS) draw_fields(ctx, ide);
     else if (ide->modal == IDE_MODAL_CONFIG) draw_configs(ctx, ide);
     else if (ide->modal == IDE_MODAL_STYLE) draw_style(ctx, ide);
@@ -556,14 +954,37 @@ ide_frame(struct nk_context *ctx, Ide *ide, int width, int height)
 {
     struct nk_rect r;
     nk_flags box = NK_WINDOW_BORDER | NK_WINDOW_TITLE;
-    int left = 230;
-    int right = 320;
-    int top = 78;
-    int bottom = 150;
+    int left;
+    int right;
+    int top;
+    int bottom;
+    int gap;
     TrWidget *sel;
     int i;
-    if (width < 800) width = 800;
-    if (height < 500) height = 500;
+    prepare_style(ctx, ide);
+    left = px(230);
+    right = px(320);
+    top = px(78);
+    bottom = px(150);
+    gap = px(160);
+    if (width < 1) width = 1;
+    if (height < 1) height = 1;
+    if (left + right + gap > width) {
+        int room = width - gap;
+        if (room < 2) room = 2;
+        left = room * 230 / (230 + 320);
+        if (left < 1) left = 1;
+        right = room - left;
+        if (right < 1) right = 1;
+    }
+    if (top + bottom + px(120) > height) {
+        int room = height - px(120);
+        if (room < 2) room = 2;
+        top = room * 78 / (78 + 150);
+        if (top < 1) top = 1;
+        bottom = room - top;
+        if (bottom < 1) bottom = 1;
+    }
     nhits = 0;
     r = nk_rect(0, 0, (float)width, (float)top);
     if (panel(ctx, "tccrad", r, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) draw_toolbar(ctx, ide);
@@ -571,12 +992,15 @@ ide_frame(struct nk_context *ctx, Ide *ide, int width, int height)
 
     {
         int avail = height - top - bottom;
-        int pal_h = avail / 2;
-        if (pal_h < 180) pal_h = 180;
-        if (pal_h > avail - 140) pal_h = avail - 140;
+        int pal_h;
+        if (avail < 2) avail = 2;
+        pal_h = avail / 2;
+        if (pal_h < px(180) && px(180) + px(140) <= avail) pal_h = px(180);
+        if (avail - pal_h < px(140) && avail > px(140)) pal_h = avail - px(140);
+        if (pal_h < 1) pal_h = 1;
         r = nk_rect(0, (float)top, (float)left, (float)pal_h);
         if (panel(ctx, "Palette", r, box)) {
-            nk_layout_row_dynamic(ctx, 22, 2);
+            nk_layout_row_dynamic(ctx, pxf(22), 2);
             for (i = 0; i < (int)(sizeof palette / sizeof palette[0]); i++) {
                 if (nk_button_label(ctx, tr_kind_name(palette[i]))) ide_add(ide, palette[i]);
             }
@@ -589,7 +1013,7 @@ ide_frame(struct nk_context *ctx, Ide *ide, int width, int height)
                 const TrWidget *root = &ide->doc->widgets[0];
                 char line[96];
                 snprintf(line, sizeof line, "%s %s", tr_kind_name(root->kind), root->name);
-                nk_layout_row_dynamic(ctx, 22, 1);
+                nk_layout_row_dynamic(ctx, pxf(22), 1);
                 if (nk_select_label(ctx, line, NK_TEXT_LEFT, root->id == ide->selected))
                     ide_select(ide, root->id);
                 draw_tree(ctx, ide, root->id, 1);
@@ -620,7 +1044,7 @@ ide_frame(struct nk_context *ctx, Ide *ide, int width, int height)
         const TrWidget *root = ide->doc->nwidgets ? &ide->doc->widgets[0] : NULL;
         char title[TR_TEXT_MAX + 8];
         if (root) {
-            nk_layout_row_dynamic(ctx, 22, 1);
+            nk_layout_row_dynamic(ctx, pxf(22), 1);
             snprintf(title, sizeof title, "%s  [%s]", root->name, tr_backend_name(ide->doc->backend));
             nk_label(ctx, title, NK_TEXT_LEFT);
             preview_children(ctx, ide, root->id);
@@ -650,7 +1074,7 @@ ide_frame(struct nk_context *ctx, Ide *ide, int width, int height)
         char line[TR_PATH_MAX + 8];
         const char *p = ide->log;
         int shown_lines = 0;
-        nk_layout_row_dynamic(ctx, 16, 1);
+        nk_layout_row_dynamic(ctx, pxf(16), 1);
         snprintf(line, sizeof line, "%s%s", ide->dirty ? "* " : "", ide->path[0] ? ide->path : "(unsaved)");
         nk_label(ctx, line, NK_TEXT_LEFT);
         while (*p && shown_lines < 6) {

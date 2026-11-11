@@ -649,6 +649,9 @@ tr_codegen_main(const TrDoc *doc, const TrStyle *style, const char *include_name
     const char *cls;
     TrKind root_kind;
     int def = TCCRAD_BACKEND_NUKLEAR;
+    int px = 16;
+    int wx = 40;
+    int wy = 40;
     if (err && errcap) err[0] = '\0';
     if (!doc || !mout || doc->nwidgets < 1 || !include_ok(include_name)) return -1;
     if (!style) {
@@ -659,6 +662,11 @@ tr_codegen_main(const TrDoc *doc, const TrStyle *style, const char *include_name
     if (doc->backend == TR_BACKEND_LVGL) def = TCCRAD_BACKEND_LVGL;
     cls = doc->class_name;
     root_kind = doc->widgets[0].kind;
+    if (doc->scale_milli > 0) px = 16 * doc->scale_milli / 1000;
+    if (px < 12) px = 12;
+    if (px > 40) px = 40;
+    if (doc->widgets[0].x >= 0) wx = doc->widgets[0].x;
+    if (doc->widgets[0].y >= 0) wy = doc->widgets[0].y;
     memset(&g, 0, sizeof g);
     g.doc = doc;
     g.style = style;
@@ -674,11 +682,29 @@ tr_codegen_main(const TrDoc *doc, const TrStyle *style, const char *include_name
     if (cg_gp(&g, "#define NK_INCLUDE_FIXED_TYPES\n#define NK_INCLUDE_STANDARD_IO\n") != 0) return -1;
     if (cg_gp(&g, "#define NK_INCLUDE_STANDARD_VARARGS\n#define NK_INCLUDE_DEFAULT_ALLOCATOR\n") != 0)
         return -1;
-    if (cg_gp(&g, "#define NK_IMPLEMENTATION\n#define NK_XLIB_IMPLEMENTATION\n") != 0) return -1;
+    if (cg_gp(&g, "#define NK_IMPLEMENTATION\n#define NK_XLIB_IMPLEMENTATION\n#define NK_XLIB_USE_XFT\n") != 0)
+        return -1;
     if (cg_gp(&g, "#include \"nuklear.h\"\n#include \"nuklear_xlib.h\"\n#include <X11/Xutil.h>\n") != 0)
         return -1;
-    if (cg_gp(&g, "#include <time.h>\n") != 0) return -1;
+    if (cg_gp(&g, "#include <stdlib.h>\n#include <time.h>\n") != 0) return -1;
     if (cg_gp(&g, "#include \"%s\"\n", include_name) != 0) return -1;
+    if (cg_gp(&g, "static XFont *tr_ui_font(Display *dpy)\n{\n") != 0) return -1;
+    if (cg_gi(&g, 1, "static const char *const faces[] = {\n") != 0) return -1;
+    if (cg_gi(&g, 2, "\"DejaVu Sans\", \"Liberation Sans\", \"Ubuntu\", \"Sans\"\n") != 0) return -1;
+    if (cg_gi(&g, 1, "};\n") != 0) return -1;
+    if (cg_gi(&g, 1, "char name[96];\n") != 0) return -1;
+    if (cg_gi(&g, 1, "int i;\n") != 0) return -1;
+    if (cg_gi(&g, 1, "int px = %d;\n", px) != 0) return -1;
+    if (cg_gi(&g, 1, "for (i = 0; i < 4; i++) {\n") != 0) return -1;
+    if (cg_gi(&g, 2, "XFont *font;\n") != 0) return -1;
+    if (cg_gi(&g, 2, "if (snprintf(name, sizeof name, \"%%s:pixelsize=%%d\", faces[i], px) < 0) continue;\n") != 0)
+        return -1;
+    if (cg_gi(&g, 2, "font = nk_xfont_create(dpy, name);\n") != 0) return -1;
+    if (cg_gi(&g, 2, "if (font && font->ft && font->height > 0) return font;\n") != 0) return -1;
+    if (cg_gi(&g, 2, "if (font && font->ft) nk_xfont_del(dpy, font);\n") != 0) return -1;
+    if (cg_gi(&g, 2, "else free(font);\n") != 0) return -1;
+    if (cg_gi(&g, 1, "}\n") != 0) return -1;
+    if (cg_gi(&g, 1, "return 0;\n}\n\n") != 0) return -1;
     if (cg_gp(&g, "int main(void)\n{\n") != 0) return -1;
     if (cg_gi(&g, 1, "Display *dpy; Window win; XFont *font; struct nk_context *ctx;\n") != 0) return -1;
     if (cg_gi(&g, 1, "int scr; int running = 1; %s ui;\n", cls) != 0) return -1;
@@ -694,14 +720,19 @@ tr_codegen_main(const TrDoc *doc, const TrStyle *style, const char *include_name
         if (cg_gi(&g, 1, "ww = (unsigned)DisplayWidth(dpy, scr);\n") != 0) return -1;
         if (cg_gi(&g, 1, "hh = (unsigned)DisplayHeight(dpy, scr);\n") != 0) return -1;
     }
-    if (cg_gi(&g, 1, "win = XCreateSimpleWindow(dpy, RootWindow(dpy, scr), 40, 40, ww, hh, 0, 0, 0);\n") != 0)
+    if (cg_gi(&g, 1, "win = XCreateSimpleWindow(dpy, RootWindow(dpy, scr), %d, %d, ww, hh, 0, 0, 0);\n", wx, wy) != 0)
         return -1;
     if (cg_gi(&g, 1, "XStoreName(dpy, win, %s_os_title(&ui));\n", cls) != 0) return -1;
+    if (cg_gi(&g, 1, "{ Atom tr_wm = XInternAtom(dpy, \"WM_DELETE_WINDOW\", False); XSetWMProtocols(dpy, win, &tr_wm, 1); }\n") != 0)
+        return -1;
     if (cg_gi(&g, 1, "XSelectInput(dpy, win, ExposureMask|KeyPressMask|KeyReleaseMask|ButtonPressMask|ButtonReleaseMask|ButtonMotionMask|PointerMotionMask|StructureNotifyMask);\n") != 0)
         return -1;
     if (cg_gi(&g, 1, "XMapWindow(dpy, win);\n") != 0) return -1;
-    if (cg_gi(&g, 1, "font = nk_xfont_create(dpy, \"fixed\");\n") != 0) return -1;
-    if (cg_gi(&g, 1, "ctx = nk_xlib_init(font, dpy, scr, win, ww, hh);\n") != 0) return -1;
+    if (cg_gi(&g, 1, "font = tr_ui_font(dpy);\n") != 0) return -1;
+    if (cg_gi(&g, 1, "if (!font) { fprintf(stderr, \"outline font not found\\n\"); return 1; }\n") != 0)
+        return -1;
+    if (cg_gi(&g, 1, "ctx = nk_xlib_init(font, dpy, scr, win, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr), ww, hh);\n") != 0)
+        return -1;
     if (cg_gi(&g, 1, "if (!ctx) return 1;\n") != 0) return -1;
     if (emit_colors(&g) != 0) return -1;
     if (cg_gi(&g, 1, "while (running) {\n") != 0) return -1;
@@ -712,6 +743,8 @@ tr_codegen_main(const TrDoc *doc, const TrStyle *style, const char *include_name
     if (cg_gi(&g, 3, "nk_xlib_handle_event(dpy, scr, win, &ev);\n") != 0) return -1;
     if (cg_gi(&g, 2, "}\n") != 0) return -1;
     if (cg_gi(&g, 2, "nk_input_end(ctx);\n") != 0) return -1;
+    if (cg_gi(&g, 2, "{ XWindowAttributes tr_at; if (XGetWindowAttributes(dpy, win, &tr_at) && tr_at.width > 0 && tr_at.height > 0) { ww = (unsigned)tr_at.width; hh = (unsigned)tr_at.height; } }\n") != 0)
+        return -1;
     if (cg_gi(&g, 2, "if (!%s_frame(ctx, &ui, (float)ww, (float)hh)) running = 0;\n", cls) != 0)
         return -1;
     if (cg_gi(&g, 2, "XClearWindow(dpy, win);\n") != 0) return -1;
@@ -735,7 +768,8 @@ tr_codegen_main(const TrDoc *doc, const TrStyle *style, const char *include_name
     if (cg_gi(&g, 1, "uiUninit();\n") != 0) return -1;
     if (cg_gi(&g, 1, "return 0;\n}\n") != 0) return -1;
     if (cg_gp(&g, "#elif TCCRAD_BACKEND == TCCRAD_BACKEND_LVGL\n") != 0) return -1;
-    if (cg_gp(&g, "#include <lvgl.h>\n#include \"%s\"\n", include_name) != 0) return -1;
+    if (cg_gp(&g, "#include <lvgl.h>\n#include <time.h>\n#include \"%s\"\n", include_name) != 0)
+        return -1;
     if (cg_gp(&g, "int main(void)\n{\n") != 0) return -1;
     if (cg_gi(&g, 1, "%s ui;\n", cls) != 0) return -1;
     if (cg_gi(&g, 1, "lv_display_t *disp;\n") != 0) return -1;
@@ -756,7 +790,13 @@ tr_codegen_main(const TrDoc *doc, const TrStyle *style, const char *include_name
     if (cg_gi(&g, 1, "screen = lv_display_get_screen_active(disp);\n") != 0) return -1;
     if (cg_gi(&g, 1, "if (!screen) return 1;\n") != 0) return -1;
     if (cg_gi(&g, 1, "if (%s_build(&ui, screen) != 0) return 1;\n", cls) != 0) return -1;
-    if (cg_gi(&g, 1, "for (;;) lv_timer_handler();\n") != 0) return -1;
+    if (cg_gi(&g, 1, "for (;;) {\n") != 0) return -1;
+    if (cg_gi(&g, 2, "uint32_t tr_wait = lv_timer_handler();\n") != 0) return -1;
+    if (cg_gi(&g, 2, "if (tr_wait < 1u) tr_wait = 1u;\n") != 0) return -1;
+    if (cg_gi(&g, 2, "if (tr_wait > 16u) tr_wait = 16u;\n") != 0) return -1;
+    if (cg_gi(&g, 2, "{ struct timespec tr_sl; tr_sl.tv_sec = 0; tr_sl.tv_nsec = (long)tr_wait * 1000000L; nanosleep(&tr_sl, NULL); }\n") != 0)
+        return -1;
+    if (cg_gi(&g, 1, "}\n") != 0) return -1;
     if (cg_gi(&g, 1, "return 0;\n}\n") != 0) return -1;
     if (cg_gp(&g, "#endif\n") != 0) return -1;
     return 0;

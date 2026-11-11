@@ -1,6 +1,7 @@
 #include "model.h"
 #include "codegen.h"
 #include "style.h"
+#include "ide.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,6 +129,49 @@ test_codegen(const char *dir)
 }
 
 static void
+test_nav(void)
+{
+    char name[48];
+    int lines[3];
+    const char *src = "/* head */\nvoid App_init(App *ui)\n{\n}\nstatic void OkClick(App *ui)\n{\n}\n";
+    expect(ide_routine_name("void App_init(App *ui)", name, sizeof name) == 1, "routine init");
+    expect(strcmp(name, "App_init") == 0, "routine init name");
+    expect(ide_routine_name("static void Ok_click(App *ui)", name, sizeof name) == 1, "routine click");
+    expect(strcmp(name, "Ok_click") == 0, "routine click name");
+    expect(ide_routine_name("    if (n) {", name, sizeof name) == 0, "skip indented");
+    expect(ide_routine_name("#include <stdio.h>", name, sizeof name) == 0, "skip include");
+    expect(ide_routine_name("if (ready())", name, sizeof name) == 0, "skip if");
+    lines[0] = 10;
+    lines[1] = 40;
+    lines[2] = 80;
+    expect(ide_routine_index(lines, 3, 0) == -1, "declarations");
+    expect(ide_routine_index(lines, 3, 10) == 0, "first routine");
+    expect(ide_routine_index(lines, 3, 50) == 1, "middle routine");
+    expect(ide_routine_index(lines, 3, 100) == 2, "last routine");
+    expect(ide_find_line(src, "OkClick", 0) == 4, "find handler");
+    expect(ide_find_line(src, "OkClick", 5) == -1, "find past it");
+    expect(ide_find_line(src, "", 0) == -1, "empty find");
+    expect(ide_text_has("button ok_btn", "OK") == 1, "filter folds");
+    expect(ide_text_has("button ok_btn", "slider") == 0, "filter miss");
+    expect(ide_text_has("form root", "") == 1, "empty filter");
+}
+
+static void
+test_ui_pct(void)
+{
+    expect(ide_ui_clamp(0) == 100, "clamp low");
+    expect(ide_ui_clamp(100) == 100, "clamp 100");
+    expect(ide_ui_clamp(140) == 150, "snap 140");
+    expect(ide_ui_clamp(150) == 150, "clamp 150");
+    expect(ide_ui_clamp(400) == 300, "clamp high");
+    expect(ide_ui_default_pct(1080, 96) == 100, "1080 at 96dpi");
+    expect(ide_ui_default_pct(1440, 96) == 150, "1440 at 96dpi");
+    expect(ide_ui_default_pct(800, 0) == 100, "short screen");
+    expect(ide_ui_default_pct(1080, 192) == 200, "192 dpi");
+    expect(ide_ui_default_pct(2160, 96) == 250, "2160");
+}
+
+static void
 test_reject(void)
 {
     TrDoc *doc = tr_doc_new();
@@ -149,6 +193,8 @@ main(int argc, char **argv)
     test_roundtrip();
     test_codegen(dir);
     test_reject();
+    test_ui_pct();
+    test_nav();
     if (fails) {
         fprintf(stderr, "%d failed\n", fails);
         return 1;

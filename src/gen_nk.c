@@ -572,16 +572,16 @@ nk_overlay(Gen *g, const TrWidget *w, int d)
     int ww = w->w > 0 ? w->w : 120;
     int hh = w->h > 0 ? w->h : 28;
     if (cg_gi(g, d, "{\n") != 0) return -1;
-    if (cg_gi(g, d + 1, "float tr_pw = nk_window_get_content_region(ctx).w;\n") != 0) return -1;
-    if (cg_gi(g, d + 1, "float tr_ph = nk_window_get_content_region(ctx).h;\n") != 0) return -1;
     if (cg_gi(g, d + 1, "float tr_w = (float)tr_u(ui, %d);\n", ww) != 0) return -1;
     if (cg_gi(g, d + 1, "float tr_h = (float)tr_u(ui, %d);\n", hh) != 0) return -1;
     if (cg_gi(g, d + 1, "float tr_x = (float)tr_u(ui, %d);\n", w->x) != 0) return -1;
     if (cg_gi(g, d + 1, "float tr_y = (float)tr_u(ui, %d);\n", w->y) != 0) return -1;
     if (w->anchor == 1 || w->anchor == 3) {
+        if (cg_gi(g, d + 1, "float tr_pw = nk_window_get_content_region(ctx).w;\n") != 0) return -1;
         if (cg_gi(g, d + 1, "tr_x = tr_pw - tr_x - tr_w;\n") != 0) return -1;
     }
     if (w->anchor == 2 || w->anchor == 3) {
+        if (cg_gi(g, d + 1, "float tr_ph = nk_window_get_content_region(ctx).h;\n") != 0) return -1;
         if (cg_gi(g, d + 1, "tr_y = tr_ph - tr_y - tr_h;\n") != 0) return -1;
     }
     if (cg_gi(g, d + 1, "if (tr_x < 0.0f) tr_x = 0.0f;\n") != 0) return -1;
@@ -724,8 +724,8 @@ nk_begin_root(Gen *g, const TrWidget *w, int d)
     } else {
         if (cg_gi(g, d + 1, "if (nk_begin_titled(ctx, \"%s\", ", w->name) != 0) return -1;
         if (cg_text(g, w, "title") != 0) return -1;
-        if (cg_gp(g, ", nk_rect((float)tr_u(ui, %d), (float)tr_u(ui, %d), (float)tr_u(ui, %d), (float)tr_u(ui, %d)), ",
-                w->x, w->y, ww, hh) != 0)
+        if (cg_gp(g, ", nk_rect(0, 0, vw > 1.0f ? vw : (float)tr_u(ui, %d), vh > 1.0f ? vh : (float)tr_u(ui, %d)), ",
+                ww, hh) != 0)
             return -1;
     }
     if (win_flags(g, w) != 0) return -1;

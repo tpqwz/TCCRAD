@@ -12,5 +12,8 @@
 #define LV_X11_DIRECT_EXIT 1
 #define LV_X11_DOUBLE_BUFFER 1
 #define LV_X11_RENDER_MODE_PARTIAL 1
+/* The driver can hide the desktop pointer and draw its own. Leave the
+   system cursor in place when no replacement image is provided. */
+#define LV_X11_HIDE_CURSOR 0
 
 #endif

@@ -719,7 +719,7 @@ nk_xfont_del(Display *dpy, XFont *font)
 {
     if(!font) return;
 #ifdef NK_XLIB_USE_XFT
-    XftFontClose(dpy, font->ft);
+    if (font->ft) XftFontClose(dpy, font->ft);
 #else
     if(font->set)
         XFreeFontSet(dpy, font->set);
