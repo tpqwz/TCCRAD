@@ -1023,8 +1023,8 @@ tr_doc_serialize(const TrDoc *doc, TrBuf *out)
     if (tr_buf_printf(out, "version 1\nclass %s\nbackend %s\n",
             doc->class_name, tr_backend_name(doc->backend)) != 0)
         return -1;
-    if (tr_buf_printf(out, "title %s\nunit %s\nscale_milli %d\nstyle %s\nactive %s\n",
-            doc->title, doc->unit_dp ? "dp" : "px", doc->scale_milli,
+    if (tr_buf_printf(out, "title %s\nunit %s\nscale_milli %d\nspaced %d\nstyle %s\nactive %s\n",
+            doc->title, doc->unit_dp ? "dp" : "px", doc->scale_milli, doc->spaced ? 1 : 0,
             doc->style_name, doc->active_config) != 0)
         return -1;
     for (i = 0; i < doc->nconfigs; i++) {
@@ -1267,6 +1267,13 @@ parse_into(TrDoc *doc, const char *text, size_t len, char *err, size_t errcap)
                 return -1;
             }
             doc->scale_milli = v;
+        } else if (strcmp(key, "spaced") == 0) {
+            int v = 0;
+            if (take_i(&p, &v) != 0 || (v != 0 && v != 1)) {
+                set_err(err, errcap, scan.line, "spaced must be 0 or 1");
+                return -1;
+            }
+            doc->spaced = v;
         } else if (strcmp(key, "style") == 0) {
             char name[TR_NAME_MAX];
             if (take_tok(&p, name, sizeof name) != 0) return -1;

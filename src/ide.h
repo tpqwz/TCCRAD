@@ -35,6 +35,10 @@ typedef struct Ide {
     time_t mtime;
     int selected;
     int modal;
+    int view;
+    int click_id;
+    long long click_ms;
+    char jump[TR_NAME_MAX];
     int show_all_cfg;
     int gesture;
     char status[192];
@@ -59,6 +63,7 @@ typedef struct Ide {
     char field_init[TR_TEXT_MAX];
     char config_name[TR_NAME_MAX];
     int code_scroll;
+    int code_caret;
     char code_find[64];
     int explore_sel;
     char explore_filter[48];
@@ -95,6 +100,10 @@ int ide_text_has(const char *hay, const char *needle);
 int ide_ui_clamp(int pct);
 int ide_ui_default_pct(int screen_h, int dpi);
 void ide_ui_load(Ide *ide, int screen_h, int dpi);
+int ide_scope_show(const char *line, int *depth);
+int ide_primary_event(const TrWidget *w);
+int ide_handler_name(const TrDoc *doc, const TrWidget *w, char *dst, size_t cap);
+void ide_open_code(Ide *ide, int id);
 void ide_ui_set(Ide *ide, int pct);
 void ide_ui_bump(Ide *ide, int delta);
 

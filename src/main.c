@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #define NK_IMPLEMENTATION
 #define NK_XLIB_IMPLEMENTATION
 #define NK_XLIB_USE_XFT
@@ -9,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <X11/keysym.h>
 #include <X11/Xatom.h>
 
@@ -19,7 +21,15 @@ shortcut(Ide *ide, XEvent *ev)
     if (ev->type != KeyPress) return 0;
     sym = XLookupKeysym(&ev->xkey, 0);
     if (sym == XK_F4) {
-        ide->modal = IDE_MODAL_EXPLORE;
+        ide->view = 2;
+        if (ide->modal == IDE_MODAL_CODE || ide->modal == IDE_MODAL_EXPLORE)
+            ide->modal = IDE_MODAL_NONE;
+        return 1;
+    }
+    if (sym == XK_F12) {
+        ide->view = ide->view == 0 ? 1 : 0;
+        if (ide->modal == IDE_MODAL_CODE || ide->modal == IDE_MODAL_EXPLORE)
+            ide->modal = IDE_MODAL_NONE;
         return 1;
     }
     if ((ev->xkey.state & ControlMask) == 0) return 0;
@@ -121,7 +131,7 @@ ui_font(Display *dpy, int pct)
         if (font && font->ft) nk_xfont_del(dpy, font);
         else free(font);
     }
-    fprintf(stderr, "tccrad: outline font not found\n");
+    fprintf(stderr, "TCCRAD: outline font not found\n");
     return NULL;
 }
 
@@ -142,7 +152,7 @@ main(int argc, char **argv)
     unsigned height = 800;
     dpy = XOpenDisplay(NULL);
     if (!dpy) {
-        fprintf(stderr, "tccrad: no DISPLAY\n");
+        fprintf(stderr, "TCCRAD: no DISPLAY\n");
         return 1;
     }
     screen = DefaultScreen(dpy);
@@ -165,7 +175,7 @@ main(int argc, char **argv)
     if (width < 640u) width = 640u;
     if (height < 480u) height = 480u;
     win = XCreateSimpleWindow(dpy, root, 40, 40, width, height, 0, 0, 0);
-    XStoreName(dpy, win, "tccrad");
+    XStoreName(dpy, win, "TCCRAD");
     {
         Atom wm = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
         XSetWMProtocols(dpy, win, &wm, 1);
@@ -174,11 +184,17 @@ main(int argc, char **argv)
         ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask |
         ButtonReleaseMask | ButtonMotionMask | PointerMotionMask | StructureNotifyMask);
     XMapWindow(dpy, win);
+    {
+        XSetWindowAttributes attr;
+        attr.bit_gravity = NorthWestGravity;
+        attr.background_pixel = BlackPixel(dpy, screen);
+        XChangeWindowAttributes(dpy, win, CWBitGravity | CWBackPixel, &attr);
+    }
     font = ui_font(dpy, font_pct);
     ctx = font ? nk_xlib_init(font, dpy, screen, win,
         DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), width, height) : NULL;
     if (!ctx || !font) {
-        fprintf(stderr, "tccrad: nuklear init failed\n");
+        fprintf(stderr, "TCCRAD: nuklear init failed\n");
         ide_free(ide);
         nk_xfont_del(dpy, font);
         XCloseDisplay(dpy);
@@ -223,9 +239,14 @@ main(int argc, char **argv)
         ide_note_disk(ide);
         ide_frame(ctx, ide, (int)width, (int)height);
         ide_after_frame(ide, nk_item_is_any_active(ctx) ? 1 : 0);
-        XClearWindow(dpy, win);
         nk_xlib_render(win, nk_rgb(18, 18, 18));
         XFlush(dpy);
+        {
+            struct timespec tr_sl;
+            tr_sl.tv_sec = 0;
+            tr_sl.tv_nsec = 16000000L;
+            nanosleep(&tr_sl, NULL);
+        }
     }
     ide_free(ide);
     nk_xfont_del(dpy, font);

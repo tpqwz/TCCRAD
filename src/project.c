@@ -54,6 +54,115 @@ tr_home_dir(char *dst, size_t cap)
 }
 
 static int
+dir_parent(char *dst, size_t cap, const char *path)
+{
+    size_t n;
+    if (!path || !dst || cap < 2) return -1;
+    n = strlen(path);
+    while (n > 1 && path[n - 1] == '/') n--;
+    while (n > 0 && path[n - 1] != '/') n--;
+    if (n <= 1) return -1;
+    if (n - 1 >= cap) return -1;
+    memcpy(dst, path, n - 1);
+    dst[n - 1] = '\0';
+    return 0;
+}
+
+static int
+offside_bin(char *dst, size_t cap)
+{
+    const char *env = getenv("TCCRAD_OFFSIDE");
+    char home[TR_PATH_MAX];
+    char parent[TR_PATH_MAX];
+    char mid[TR_PATH_MAX];
+    char bin[TR_PATH_MAX];
+    if (env && env[0] != '\0' && access(env, X_OK) == 0) return tr_copy_cap(dst, cap, env);
+    if (tr_home_dir(home, sizeof home) == 0 && dir_parent(parent, sizeof parent, home) == 0 &&
+        tr_path_join(mid, sizeof mid, parent, "offside") == 0 &&
+        tr_path_join(bin, sizeof bin, mid, "bin") == 0 &&
+        tr_path_join(dst, cap, bin, "offside") == 0 &&
+        access(dst, X_OK) == 0) {
+        return 0;
+    }
+    if (tr_home_dir(home, sizeof home) == 0 && dir_parent(parent, sizeof parent, home) == 0 &&
+        tr_path_join(mid, sizeof mid, parent, "offside") == 0 &&
+        tr_path_join(bin, sizeof bin, mid, "c") == 0 &&
+        tr_path_join(mid, sizeof mid, bin, "build") == 0 &&
+        tr_path_join(dst, cap, mid, "offside") == 0 &&
+        access(dst, X_OK) == 0) {
+        return 0;
+    }
+    return tr_copy_cap(dst, cap, "offside");
+}
+
+int
+tr_spaced_emit(const char *text, size_t n, char **out, size_t *out_len, char *err, size_t errcap)
+{
+    char bin[TR_PATH_MAX];
+    char path[64];
+    char *buf;
+    char *av[8];
+    int code = -1;
+    size_t cap = 65536;
+    int nw;
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (err && errcap) err[0] = '\0';
+    if (!text || !out || n > 32768) {
+        if (err && errcap) tr_copy_cap(err, errcap, "spaced C region is too large");
+        return -1;
+    }
+    if (offside_bin(bin, sizeof bin) != 0) return -1;
+    nw = snprintf(path, sizeof path, "/tmp/tccrad-space-%ld.csp", (long)getpid());
+    if (nw < 0 || (size_t)nw >= sizeof path) return -1;
+    {
+        char *file;
+        size_t fn = n;
+        int extra = (n == 0 || text[n - 1] != '\n') ? 1 : 0;
+        file = malloc(n + (size_t)extra + 1);
+        if (!file) return -1;
+        if (n > 0) memcpy(file, text, n);
+        if (extra) file[n] = '\n';
+        file[n + (size_t)extra] = '\0';
+        fn = n + (size_t)extra;
+        if (tr_write_file(path, file, fn) != 0) {
+            free(file);
+            if (err && errcap) tr_copy_cap(err, errcap, "could not write the spaced C fragment");
+            return -1;
+        }
+        free(file);
+    }
+    buf = malloc(cap);
+    if (!buf) {
+        unlink(path);
+        return -1;
+    }
+    buf[0] = '\0';
+    av[0] = bin;
+    av[1] = "emit";
+    av[2] = path;
+    av[3] = "--plain";
+    av[4] = "--lang";
+    av[5] = "c";
+    av[6] = NULL;
+    if (tr_spawn_wait(av, "/tmp", buf, cap, &code, 10000) != 0 || code != 0) {
+        free(buf);
+        unlink(path);
+        if (err && errcap) tr_copy_cap(err, errcap, "spaced C needs the offside command");
+        return -1;
+    }
+    unlink(path);
+    if (buf[0] == '\0' || strlen(buf) + 1 >= cap) {
+        free(buf);
+        if (err && errcap) tr_copy_cap(err, errcap, "spaced C produced no host code");
+        return -1;
+    }
+    *out = buf;
+    if (out_len) *out_len = strlen(buf);
+    return 0;
+}
+
+static int
 spawn_common(char *const argv[], const char *dir, int logfd, pid_t *pid)
 {
     posix_spawn_file_actions_t fa;

@@ -131,6 +131,7 @@ typedef struct TrDoc {
     char style_name[TR_NAME_MAX];
     int unit_dp;
     int scale_milli;
+    int spaced;
     char active_config[TR_NAME_MAX];
     char configs[TR_CONFIGS_MAX][TR_NAME_MAX];
     int nconfigs;

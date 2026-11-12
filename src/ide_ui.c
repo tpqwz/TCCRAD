@@ -1,9 +1,11 @@
+#define _POSIX_C_SOURCE 200809L
 #include "ide.h"
 #include "codegen.h"
 #include "nk_glue.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static int nhits;
 static struct { int id; struct nk_rect r; } hits[TR_WIDGETS_MAX];
@@ -217,6 +219,22 @@ shown(const TrWidget *w, const char *key, char *buf, size_t cap)
 
 static void preview_children(struct nk_context *ctx, Ide *ide, int parent);
 
+static int
+double_click(Ide *ide, int id)
+{
+    struct timespec ts;
+    long long ms;
+    int again;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    ms = (long long)ts.tv_sec * 1000LL;
+    ms += (long long)(ts.tv_nsec / 1000000L);
+    again = id == ide->click_id && ide->click_ms > 0 &&
+        ms >= ide->click_ms && ms - ide->click_ms < 450;
+    ide->click_id = id;
+    ide->click_ms = ms;
+    return again;
+}
+
 static void
 preview_one(struct nk_context *ctx, Ide *ide, const TrWidget *w)
 {
@@ -329,8 +347,13 @@ draw_tree(struct nk_context *ctx, Ide *ide, int parent, int depth)
         if (pad > 12) pad = 12;
         snprintf(line, sizeof line, "%*s%s %s", pad, "", tr_kind_name(w->kind), w->name);
         nk_layout_row_dynamic(ctx, pxf(22), 1);
-        if (nk_select_label(ctx, line, NK_TEXT_LEFT, w->id == ide->selected))
-            ide_select(ide, w->id);
+        {
+            int on = w->id == ide->selected;
+            if (nk_selectable_label(ctx, line, NK_TEXT_LEFT, &on)) {
+                if (double_click(ide, w->id)) ide_open_code(ide, w->id);
+                else ide_select(ide, w->id);
+            }
+        }
         if (tr_kind_is_container(w->kind)) draw_tree(ctx, ide, w->id, depth + 1);
     }
 }
@@ -434,6 +457,8 @@ event_editor(struct nk_context *ctx, Ide *ide, TrWidget *w)
         ide->body_len = (int)strlen(ide->body);
         ide->body_id = w->id;
     }
+    nk_layout_row_dynamic(ctx, pxf(22), 1);
+    nk_checkbox_label(ctx, "Spaced C", &ide->doc->spaced);
     nk_layout_row_dynamic(ctx, pxf(120), 1);
     nk_edit_string(ctx, NK_EDIT_BOX, ide->body, &ide->body_len, IDE_BODY, nk_filter_default);
     if (ide->body_len < 0) ide->body_len = 0;
@@ -455,7 +480,7 @@ draw_toolbar(struct nk_context *ctx, Ide *ide)
     char zoom[16];
     int zn;
     nk_menubar_begin(ctx);
-    nk_layout_row_begin(ctx, NK_STATIC, (float)px(22), 9);
+    nk_layout_row_begin(ctx, NK_STATIC, (float)px(22), 11);
     nk_layout_row_push(ctx, (float)px(50));
     if (nk_menu_begin_label(ctx, "File", NK_TEXT_LEFT, nk_vec2((float)px(160), (float)px(200)))) {
         nk_layout_row_dynamic(ctx, pxf(22), 1);
@@ -496,12 +521,15 @@ draw_toolbar(struct nk_context *ctx, Ide *ide)
     nk_layout_row_push(ctx, (float)px(60));
     if (nk_menu_begin_label(ctx, "View", NK_TEXT_LEFT, nk_vec2((float)px(180), (float)px(340)))) {
         nk_layout_row_dynamic(ctx, pxf(22), 1);
-        if (nk_menu_item_label(ctx, "Code", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_CODE;
-        if (nk_menu_item_label(ctx, "Explore", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_EXPLORE;
+        if (nk_menu_item_label(ctx, "Design", NK_TEXT_LEFT)) ide->view = 0;
+        if (nk_menu_item_label(ctx, "Code", NK_TEXT_LEFT)) ide->view = 1;
+        if (nk_menu_item_label(ctx, "Explore", NK_TEXT_LEFT)) ide->view = 2;
         if (nk_menu_item_label(ctx, "Fields", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_FIELDS;
         if (nk_menu_item_label(ctx, "Configs", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_CONFIG;
         if (nk_menu_item_label(ctx, "Style", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_STYLE;
         if (nk_menu_item_label(ctx, "All configs", NK_TEXT_LEFT)) ide->show_all_cfg = !ide->show_all_cfg;
+        if (nk_menu_item_label(ctx, "Spaced C", NK_TEXT_LEFT) && ide->doc)
+            ide->doc->spaced = !ide->doc->spaced;
         if (nk_menu_item_label(ctx, "Smaller", NK_TEXT_LEFT)) ide_ui_bump(ide, -25);
         if (nk_menu_item_label(ctx, "Larger", NK_TEXT_LEFT)) ide_ui_bump(ide, 25);
         nk_menu_end(ctx);
@@ -523,6 +551,10 @@ draw_toolbar(struct nk_context *ctx, Ide *ide)
         if (nk_menu_item_label(ctx, "About", NK_TEXT_LEFT)) ide->modal = IDE_MODAL_ABOUT;
         nk_menu_end(ctx);
     }
+    nk_layout_row_push(ctx, (float)px(72));
+    if (nk_button_label(ctx, "Design")) ide->view = 0;
+    nk_layout_row_push(ctx, (float)px(60));
+    if (nk_button_label(ctx, "Code")) ide->view = 1;
     nk_layout_row_push(ctx, (float)px(28));
     if (nk_button_label(ctx, "-")) ide_ui_bump(ide, -25);
     nk_layout_row_push(ctx, (float)px(64));
@@ -713,7 +745,7 @@ collect_routines(const char *text, char names[][48], int *lines, int max)
 }
 
 static void
-draw_code(struct nk_context *ctx, Ide *ide)
+draw_code(struct nk_context *ctx, Ide *ide, int body)
 {
     char names[48][48];
     int lines[48];
@@ -723,67 +755,117 @@ draw_code(struct nk_context *ctx, Ide *ide)
     const char *p;
     int line = 0;
     int shown = 0;
+    int limit;
     refresh_preview(ide);
     p = ide->preview.data ? ide->preview.data : "";
+    if (ide->jump[0] != '\0') {
+        char needle[96];
+        int at = -1;
+        int nw = snprintf(needle, sizeof needle, "void %s(", ide->jump);
+        if (nw > 0 && (size_t)nw < sizeof needle) at = ide_find_line(p, needle, 0);
+        if (at >= 0) {
+            ide->code_scroll = at;
+            ide->code_caret = at;
+        }
+        ide->jump[0] = '\0';
+    }
     nrout = collect_routines(p, names, lines, 48);
     current = ide_routine_index(lines, nrout, ide->code_scroll);
+    if (body < px(160)) body = px(160);
+    limit = body / px(18);
+    if (limit < 8) limit = 8;
+    if (limit > 40) limit = 40;
+    {
+        const char *items[49];
+        int pick = current < 0 ? 0 : current + 1;
+        int got;
+        int nitems = nrout + 1;
+        if (nitems > 49) nitems = 49;
+        items[0] = "(declarations)";
+        for (i = 0; i < nitems - 1; i++) items[i + 1] = names[i];
+        nk_layout_row_dynamic(ctx, pxf(24), 1);
+        got = nk_combo(ctx, items, nitems, pick, px(22), nk_vec2((float)px(360), (float)px(280)));
+        if (got != pick) {
+            int dest = 0;
+            if (got > 0 && got - 1 < nrout) dest = lines[got - 1];
+            ide->code_scroll = dest;
+            ide->code_caret = dest;
+            current = ide_routine_index(lines, nrout, ide->code_scroll);
+        }
+    }
     nk_layout_row_dynamic(ctx, pxf(24), 2);
     nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, ide->code_find, (int)sizeof ide->code_find, nk_filter_default);
     if (nk_button_label(ctx, "Find next")) {
         int at = ide_find_line(p, ide->code_find, ide->code_scroll + 1);
         if (at < 0) at = ide_find_line(p, ide->code_find, 0);
-        if (at >= 0) ide->code_scroll = at;
+        if (at >= 0) {
+            ide->code_scroll = at;
+            ide->code_caret = at;
+        }
         else ide_set_status(ide, "not found");
     }
-    nk_layout_row_begin(ctx, NK_STATIC, (float)px(320), 2);
-    nk_layout_row_push(ctx, (float)px(180));
-    if (nk_group_begin(ctx, "routines", NK_WINDOW_BORDER)) {
-        int on = current < 0;
-        nk_layout_row_dynamic(ctx, pxf(20), 1);
-        if (nk_selectable_label(ctx, "(declarations)", NK_TEXT_LEFT, &on) && current < 0)
-            ide->code_scroll = 0;
-        else if (on && current >= 0) ide->code_scroll = 0;
-        for (i = 0; i < nrout; i++) {
-            int sel = i == current;
-            nk_layout_row_dynamic(ctx, pxf(20), 1);
-            if (nk_selectable_label(ctx, names[i], NK_TEXT_LEFT, &sel)) {
-                ide->code_scroll = lines[i];
-            }
-        }
-        nk_group_end(ctx);
-    }
-    nk_layout_row_push(ctx, (float)px(560));
+    nk_layout_row_dynamic(ctx, (float)body, 1);
     if (nk_group_begin(ctx, "source", NK_WINDOW_BORDER)) {
         p = ide->preview.data ? ide->preview.data : "";
         line = 0;
-        while (*p && shown < 16 && line < 100000) {
-            char row[140];
-            char gutter[160];
-            size_t k = 0;
-            int nw;
-            while (p[k] && p[k] != '\n' && k + 1 < sizeof row) {
-                row[k] = p[k];
-                k++;
+        {
+            int depth = 0;
+            while (*p && shown < limit && line < 100000) {
+                char row[140];
+                char bars[16];
+                char gutter[180];
+                size_t k = 0;
+                int nw;
+                int show;
+                int b;
+                while (p[k] && p[k] != '\n' && k + 1 < sizeof row) {
+                    row[k] = p[k];
+                    k++;
+                }
+                row[k] = '\0';
+                show = ide_scope_show(row, &depth);
+                bars[0] = '\0';
+                for (b = 0; b < show && b < (int)sizeof bars - 1; b++) bars[b] = '|';
+                if (b < (int)sizeof bars) bars[b] = '\0';
+                if (line >= ide->code_scroll) {
+                    struct nk_color hl = nk_rgb(48, 62, 84);
+                    int hot = line == ide->code_caret;
+                    struct nk_rect box;
+                    nw = snprintf(gutter, sizeof gutter, "%4d %s", line + 1, bars);
+                    if (nw < 0) gutter[0] = '\0';
+                    nk_layout_row_begin(ctx, NK_DYNAMIC, pxf(18), 2);
+                    nk_layout_row_push(ctx, 0.14f);
+                    box = nk_widget_bounds(ctx);
+                    if (hot) nk_fill_rect(nk_window_get_canvas(ctx), box, 0, hl);
+                    nk_label(ctx, gutter, NK_TEXT_LEFT);
+                    nk_layout_row_push(ctx, 0.86f);
+                    box = nk_widget_bounds(ctx);
+                    if (hot) nk_fill_rect(nk_window_get_canvas(ctx), box, 0, hl);
+                    nk_label(ctx, row, NK_TEXT_LEFT);
+                    nk_layout_row_end(ctx);
+                    shown++;
+                }
+                p += k;
+                if (*p == '\n') p++;
+                line++;
             }
-            row[k] = '\0';
-            if (line >= ide->code_scroll) {
-                nw = snprintf(gutter, sizeof gutter, "%4d  %s", line + 1, row);
-                if (nw < 0) gutter[0] = '\0';
-                nk_layout_row_dynamic(ctx, pxf(18), 1);
-                nk_label(ctx, gutter, NK_TEXT_LEFT);
-                shown++;
-            }
-            p += k;
-            if (*p == '\n') p++;
-            line++;
         }
         nk_group_end(ctx);
     }
-    nk_layout_row_end(ctx);
     nk_layout_row_dynamic(ctx, pxf(24), 3);
-    if (nk_button_label(ctx, "Up")) if (ide->code_scroll > 0) ide->code_scroll -= 8;
-    if (nk_button_label(ctx, "Down")) ide->code_scroll += 8;
-    if (nk_button_label(ctx, "Close")) ide->modal = IDE_MODAL_NONE;
+    if (nk_button_label(ctx, "Up") && ide->code_caret > 0) {
+        ide->code_caret--;
+        if (ide->code_caret < ide->code_scroll) ide->code_scroll = ide->code_caret;
+    }
+    if (nk_button_label(ctx, "Down")) {
+        ide->code_caret++;
+        if (ide->code_caret >= ide->code_scroll + limit)
+            ide->code_scroll = ide->code_caret - limit + 1;
+    }
+    if (nk_button_label(ctx, "Design")) {
+        ide->view = 0;
+        ide->modal = IDE_MODAL_NONE;
+    }
 }
 
 enum { EX_FORM = 1, EX_WIDGET, EX_PROC };
@@ -793,10 +875,14 @@ open_explore(Ide *ide, int kind, int id, int line)
 {
     if (kind == EX_PROC) {
         ide->code_scroll = line > 0 ? line : 0;
-        ide->modal = IDE_MODAL_CODE;
+        ide->code_caret = ide->code_scroll;
+        ide->jump[0] = '\0';
+        ide->view = 1;
+        ide->modal = IDE_MODAL_NONE;
         return;
     }
     if (id > 0) ide_select(ide, id);
+    ide->view = 0;
     ide->modal = IDE_MODAL_NONE;
 }
 
@@ -903,14 +989,17 @@ draw_explore(struct nk_context *ctx, Ide *ide)
     nk_layout_row_dynamic(ctx, pxf(26), 2);
     if (nk_button_label(ctx, "Open") && ide->explore_sel >= 0 && ide->explore_sel < n)
         open_explore(ide, kinds[ide->explore_sel], ids[ide->explore_sel], lns[ide->explore_sel]);
-    if (nk_button_label(ctx, "Close")) ide->modal = IDE_MODAL_NONE;
+    if (nk_button_label(ctx, "Design")) {
+        ide->view = 0;
+        ide->modal = IDE_MODAL_NONE;
+    }
 }
 
 static void
 draw_about(struct nk_context *ctx, Ide *ide)
 {
     nk_layout_row_dynamic(ctx, pxf(18), 1);
-    nk_label(ctx, "tccrad 0.1.0-alpha.1", NK_TEXT_LEFT);
+    nk_label(ctx, "TCCRAD 0.1.0-alpha.1", NK_TEXT_LEFT);
     nk_label(ctx, "A C RAD studio for Nuklear, libui, and LVGL.", NK_TEXT_LEFT);
     nk_label(ctx, "Designs round-trip through generated C. TinyCC builds and runs them.", NK_TEXT_LEFT);
     nk_label(ctx, "Bounded copies, checked allocation, posix_spawn. No system().", NK_TEXT_LEFT);
@@ -939,7 +1028,7 @@ draw_modal(struct nk_context *ctx, Ide *ide, int w, int h)
         return;
     }
     if (ide->modal == IDE_MODAL_OPEN || ide->modal == IDE_MODAL_SAVE) draw_files(ctx, ide);
-    else if (ide->modal == IDE_MODAL_CODE) draw_code(ctx, ide);
+    else if (ide->modal == IDE_MODAL_CODE) draw_code(ctx, ide, px(320));
     else if (ide->modal == IDE_MODAL_EXPLORE) draw_explore(ctx, ide);
     else if (ide->modal == IDE_MODAL_FIELDS) draw_fields(ctx, ide);
     else if (ide->modal == IDE_MODAL_CONFIG) draw_configs(ctx, ide);
@@ -990,6 +1079,50 @@ ide_frame(struct nk_context *ctx, Ide *ide, int width, int height)
     if (panel(ctx, "tccrad", r, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) draw_toolbar(ctx, ide);
     nk_end(ctx);
 
+    if (ide->modal == IDE_MODAL_CODE) {
+        ide->view = 1;
+        ide->modal = IDE_MODAL_NONE;
+    }
+    if (ide->modal == IDE_MODAL_EXPLORE) {
+        ide->view = 2;
+        ide->modal = IDE_MODAL_NONE;
+    }
+    if (ide->view == 1 || ide->view == 2) {
+        int body = height - top - bottom - px(70);
+        const char *page = ide->view == 1 ? "Code" : "Explore";
+        if (body < px(160)) body = px(160);
+        r = nk_rect(0, (float)top, (float)width, (float)height - (float)top - (float)bottom);
+        if (panel(ctx, page, r, box)) {
+            if (ide->view == 1) draw_code(ctx, ide, body);
+            else draw_explore(ctx, ide);
+        }
+        nk_end(ctx);
+        r = nk_rect(0, (float)height - (float)bottom, (float)width, (float)bottom);
+        if (panel(ctx, "Output", r, box)) {
+            char line[TR_PATH_MAX + 8];
+            const char *p = ide->log;
+            int shown_lines = 0;
+            nk_layout_row_dynamic(ctx, pxf(16), 1);
+            snprintf(line, sizeof line, "%s%s", ide->dirty ? "* " : "", ide->path[0] ? ide->path : "(unsaved)");
+            nk_label(ctx, line, NK_TEXT_LEFT);
+            while (*p && shown_lines < 6) {
+                size_t n = 0;
+                while (p[n] && p[n] != '\n' && n + 1 < sizeof line) {
+                    line[n] = p[n];
+                    n++;
+                }
+                line[n] = '\0';
+                nk_label(ctx, line, NK_TEXT_LEFT);
+                shown_lines++;
+                p += n;
+                if (*p == '\n') p++;
+            }
+        }
+        nk_end(ctx);
+        draw_modal(ctx, ide, width, height);
+        return;
+    }
+
     {
         int avail = height - top - bottom;
         int pal_h;
@@ -1014,8 +1147,13 @@ ide_frame(struct nk_context *ctx, Ide *ide, int width, int height)
                 char line[96];
                 snprintf(line, sizeof line, "%s %s", tr_kind_name(root->kind), root->name);
                 nk_layout_row_dynamic(ctx, pxf(22), 1);
-                if (nk_select_label(ctx, line, NK_TEXT_LEFT, root->id == ide->selected))
-                    ide_select(ide, root->id);
+                {
+                    int on = root->id == ide->selected;
+                    if (nk_selectable_label(ctx, line, NK_TEXT_LEFT, &on)) {
+                        if (double_click(ide, root->id)) ide_open_code(ide, root->id);
+                        else ide_select(ide, root->id);
+                    }
+                }
                 draw_tree(ctx, ide, root->id, 1);
             }
         }
@@ -1063,7 +1201,10 @@ ide_frame(struct nk_context *ctx, Ide *ide, int width, int height)
                         best = hits[i].id;
                     }
                 }
-                if (best > 0) ide_select(ide, best);
+                if (best > 0) {
+                    if (double_click(ide, best)) ide_open_code(ide, best);
+                    else ide_select(ide, best);
+                }
             }
         }
     }

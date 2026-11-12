@@ -154,6 +154,54 @@ test_nav(void)
     expect(ide_text_has("button ok_btn", "OK") == 1, "filter folds");
     expect(ide_text_has("button ok_btn", "slider") == 0, "filter miss");
     expect(ide_text_has("form root", "") == 1, "empty filter");
+    {
+        char *host = NULL;
+        size_t hn = 0;
+        char why[160];
+        const char *spaced = "if (n):\n    return 1\n";
+        why[0] = '\0';
+        if (tr_spaced_emit(spaced, strlen(spaced), &host, &hn, why, sizeof why) == 0) {
+            expect(host && strstr(host, "{") != NULL, "spaced brace");
+            expect(host && strstr(host, "return 1;") != NULL, "spaced semi");
+            free(host);
+        } else {
+            expect(strstr(why, "offside") != NULL, "missing offside is named");
+        }
+    }
+}
+
+static void
+test_scope(void)
+{
+    int depth = 0;
+    expect(ide_scope_show("void f(void)", &depth) == 0, "header depth");
+    expect(ide_scope_show("{", &depth) == 0, "open stays on the brace line");
+    expect(depth == 1, "open increases");
+    expect(ide_scope_show("    return 1;", &depth) == 1, "body is inside");
+    expect(ide_scope_show("}", &depth) == 0, "close steps out");
+    expect(depth == 0, "close decreases");
+    expect(ide_scope_show("char s[] = \"{\";", &depth) == 0, "string brace ignored");
+    expect(depth == 0, "string does not nest");
+}
+
+static void
+test_jump(void)
+{
+    TrDoc *doc = tr_doc_new();
+    const TrWidget *w = NULL;
+    char name[64];
+    int i;
+    expect(doc != NULL, "jump doc");
+    if (!doc) return;
+    tr_doc_blank(doc);
+    for (i = 0; i < doc->nwidgets; i++) {
+        if (strcmp(doc->widgets[i].name, "ok_btn") == 0) w = &doc->widgets[i];
+    }
+    expect(w != NULL, "ok button");
+    expect(w && ide_primary_event(w) >= 0, "click is the handler");
+    expect(w && ide_handler_name(doc, w, name, sizeof name) == 0, "handler name");
+    expect(w && strcmp(name, "App_ok_btn_click") == 0, "default handler");
+    tr_doc_free(doc);
 }
 
 static void
@@ -195,6 +243,8 @@ main(int argc, char **argv)
     test_reject();
     test_ui_pct();
     test_nav();
+    test_jump();
+    test_scope();
     if (fails) {
         fprintf(stderr, "%d failed\n", fails);
         return 1;

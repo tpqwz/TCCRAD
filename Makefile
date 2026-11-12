@@ -9,15 +9,15 @@ CORE := src/safe.c src/model.c src/style.c src/codegen.c src/gen_nk.c src/gen_re
 
 .PHONY: all test tcc clean
 
-all: build/tccrad
+all: build/TCCRAD
 
-build/tccrad: $(CORE) src/ide_ui.c src/main.c src/nk_glue.h third_party/nuklear.h third_party/nuklear_xlib.h
+build/TCCRAD: $(CORE) src/ide_ui.c src/main.c src/nk_glue.h third_party/nuklear.h third_party/nuklear_xlib.h
 	mkdir -p build
 	$(CC) $(CFLAGS) $(INCLUDES) -c src/ide_ui.c -o build/ide_ui.o
 	$(CC) $(CFLAGS) $(INCLUDES) -c $(CORE) 
 	mv *.o build/ 2>/dev/null || true
 	$(CC) -std=c11 -Wall -Wno-unused-function -Wno-conversion $(INCLUDES) $(XFT_CFLAGS) -c src/main.c -o build/main.o
-	$(CC) $(CFLAGS) -o build/tccrad build/*.o -lX11 -lXft -lm
+	$(CC) $(CFLAGS) -o build/TCCRAD build/*.o -lX11 -lXft -lm
 
 build/test_core: tests/test_core.c $(CORE)
 	mkdir -p build
@@ -25,7 +25,7 @@ build/test_core: tests/test_core.c $(CORE)
 		src/safe.c src/model.c src/style.c src/codegen.c src/gen_nk.c src/gen_ret.c \
 		src/ide.c src/project.c
 
-test: build/test_core build/tccrad
+test: build/test_core build/TCCRAD
 	mkdir -p /tmp/tccrad-test
 	./build/test_core /tmp/tccrad-test
 	$(CC) -std=c11 -Wall -Wextra -Werror -c /tmp/tccrad-test/app.c \
@@ -40,7 +40,7 @@ test: build/test_core build/tccrad
 
 tcc: $(CORE) src/ide_ui.c src/main.c
 	mkdir -p build
-	$(TCC) -std=c11 -Wall $(INCLUDES) $(XFT_CFLAGS) -o build/tccrad-tcc \
+	$(TCC) -std=c11 -Wall $(INCLUDES) $(XFT_CFLAGS) -o build/TCCRAD-tcc \
 		src/main.c src/ide_ui.c $(CORE) -lX11 -lXft -lm
 
 clean:

@@ -264,6 +264,100 @@ ui_scale_save(int pct)
     (void)tr_write_file(path, text, (size_t)n);
 }
 
+int
+ide_scope_show(const char *line, int *depth)
+{
+    int d = depth ? *depth : 0;
+    int show;
+    int net = 0;
+    int in_str = 0;
+    int i;
+    if (!line) return 0;
+    for (i = 0; line[i] != '\0'; i++) {
+        char c = line[i];
+        if (in_str) {
+            if (c == '\\' && line[i + 1] != '\0') {
+                i++;
+                continue;
+            }
+            if (c == '"') in_str = 0;
+            continue;
+        }
+        if (c == '"') {
+            in_str = 1;
+            continue;
+        }
+        if (c == '/' && line[i + 1] == '/') break;
+        if (c == '{') net++;
+        else if (c == '}') net--;
+    }
+    show = d;
+    if (net < 0) show = d + net;
+    if (show < 0) show = 0;
+    if (show > 12) show = 12;
+    d += net;
+    if (d < 0) d = 0;
+    if (depth) *depth = d;
+    return show;
+}
+
+int
+ide_primary_event(const TrWidget *w)
+{
+    static const char *const order[] = {
+        "click", "change", "toggle", "select", "draw", "appear", "close", NULL
+    };
+    int i;
+    int e;
+    if (!w) return -1;
+    for (i = 0; order[i]; i++) {
+        for (e = 0; e < w->nevents; e++) {
+            if (strcmp(w->events[e].name, order[i]) == 0) return e;
+        }
+    }
+    return -1;
+}
+
+int
+ide_handler_name(const TrDoc *doc, const TrWidget *w, char *dst, size_t cap)
+{
+    int ev;
+    int n;
+    if (!dst || cap < 2) return -1;
+    dst[0] = '\0';
+    ev = ide_primary_event(w);
+    if (!doc || !w || ev < 0) return -1;
+    if (w->events[ev].handler[0] != '\0')
+        return tr_copy_cap(dst, cap, w->events[ev].handler);
+    n = snprintf(dst, cap, "%s_%s_%s", doc->class_name, w->name, w->events[ev].name);
+    if (n < 0 || (size_t)n >= cap) return -1;
+    return 0;
+}
+
+void
+ide_open_code(Ide *ide, int id)
+{
+    TrWidget *w;
+    char name[TR_NAME_MAX];
+    char msg[96];
+    int ev;
+    int n;
+    if (!ide) return;
+    ide_select(ide, id);
+    w = tr_doc_widget(ide->doc, id);
+    ev = ide_primary_event(w);
+    if (ev >= 0) ide->body_ev = ev;
+    ide->body_id = 0;
+    ide->jump[0] = '\0';
+    if (ide_handler_name(ide->doc, w, name, sizeof name) == 0)
+        tr_copy_cap(ide->jump, sizeof ide->jump, name);
+    ide->view = 1;
+    if (ide->modal == IDE_MODAL_CODE || ide->modal == IDE_MODAL_EXPLORE)
+        ide->modal = IDE_MODAL_NONE;
+    n = snprintf(msg, sizeof msg, "Code %s", ide->jump[0] ? ide->jump : "handler");
+    if (n > 0 && (size_t)n < sizeof msg) ide_set_status(ide, msg);
+}
+
 void
 ide_ui_load(Ide *ide, int screen_h, int dpi)
 {
