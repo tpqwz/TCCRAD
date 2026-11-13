@@ -18,7 +18,7 @@ call_named(Gen *g, const TrWidget *w, const char *ev, int d)
 {
     const TrEvent *e = cg_event(w, ev);
     char hn[TR_NAME_MAX];
-    if (!e) return 0;
+    if (!e || !cg_event_armed(g->doc, w, e)) return 0;
     if (cg_handler(g->doc, w, e, hn, sizeof hn) != 0) return cg_err(g, "handler name is invalid");
     return cg_gi(g, d, "%s(ui);\n", hn);
 }
@@ -171,6 +171,7 @@ ui_widget(Gen *g, const TrWidget *w, const char *box, int d)
     CgSlot s;
     if (d > 32) return cg_err(g, "widget nesting is too deep");
     if (snprintf(var, sizeof var, "tr_w_%d", w->id) < 0) return -1;
+    if (cg_gi(g, d, "/* @tccrad w %d */\n", w->id) != 0) return -1;
     switch (w->kind) {
     case TR_KIND_LABEL:
         if (cg_gi(g, d, "{\n") != 0) return -1;
@@ -637,6 +638,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
     int st = stretch_of(w);
     if (d > 32) return cg_err(g, "widget nesting is too deep");
     if (snprintf(var, sizeof var, "tr_o_%d", w->id) < 0) return -1;
+    if (cg_gi(g, d, "/* @tccrad w %d */\n", w->id) != 0) return -1;
     switch (w->kind) {
     case TR_KIND_LABEL:
         if (cg_gi(g, d, "{ lv_obj_t *%s = lv_label_create(%s);\n", var, parent) != 0) return -1;

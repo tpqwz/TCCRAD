@@ -114,6 +114,17 @@ cg_event(const TrWidget *w, const char *name)
 }
 
 int
+cg_event_armed(const TrDoc *doc, const TrWidget *w, const TrEvent *ev)
+{
+    const char *t;
+    if (!ev) return 0;
+    if (w && w->kind == TR_KIND_CUSTOM && strcmp(ev->name, "draw") == 0) return 1;
+    if (ev->handler[0] != '\0') return 1;
+    t = tr_span_ptr(doc, ev->user);
+    return t && t[0] != '\0';
+}
+
+int
 cg_handler(const TrDoc *doc, const TrWidget *w, const TrEvent *ev, char *dst, size_t cap)
 {
     int n;
@@ -185,6 +196,7 @@ handler_ok(const TrDoc *doc)
         const TrWidget *w = &doc->widgets[i];
         for (e = 0; e < w->nevents; e++) {
             if (n >= (int)(sizeof names / sizeof names[0])) return -1;
+            if (!cg_event_armed(doc, w, &w->events[e])) continue;
             if (cg_handler(doc, w, &w->events[e], names[n], TR_NAME_MAX) != 0) return -1;
             n++;
         }
@@ -332,6 +344,7 @@ emit_struct(Gen *g, TrBuf *h)
         int e;
         for (e = 0; e < w->nevents; e++) {
             char hn[TR_NAME_MAX];
+            if (!cg_event_armed(g->doc, w, &w->events[e])) continue;
             if (cg_handler(g->doc, w, &w->events[e], hn, sizeof hn) != 0) return -1;
             if (w->kind == TR_KIND_CUSTOM && strcmp(w->events[e].name, "draw") == 0) {
                 if (cg_gp(g, "void %s(%s *ui, void *tr_backend);\n", hn, cls) != 0) return -1;
@@ -445,6 +458,7 @@ emit_handlers(Gen *g)
             char hn[TR_NAME_MAX];
             char tag[96];
             int n;
+            if (!cg_event_armed(g->doc, w, &w->events[e])) continue;
             if (cg_handler(g->doc, w, &w->events[e], hn, sizeof hn) != 0) return -1;
             n = snprintf(tag, sizeof tag, "event %d %s", w->id, w->events[e].name);
             if (n < 0 || (size_t)n >= sizeof tag) return -1;

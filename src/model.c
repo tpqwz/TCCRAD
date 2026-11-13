@@ -254,6 +254,11 @@ tr_event_defs(TrKind kind, int *n)
     case TR_KIND_MAIN: case TR_KIND_ACTIVITY:
         e = ev_appear; break;
     case TR_KIND_BUTTON: case TR_KIND_MENUITEM:
+    case TR_KIND_LABEL: case TR_KIND_IMAGE: case TR_KIND_GROUP:
+    case TR_KIND_PROGRESS: case TR_KIND_COLOR: case TR_KIND_TAB:
+    case TR_KIND_MENU: case TR_KIND_MENUBAR: case TR_KIND_SEPARATOR:
+    case TR_KIND_SPACER: case TR_KIND_SPLITTER: case TR_KIND_CHILD:
+    case TR_KIND_DOCK:
         e = ev_click; break;
     case TR_KIND_CHECKBOX: case TR_KIND_COLLAPSE: case TR_KIND_TREE:
         e = ev_toggle; break;
@@ -272,6 +277,21 @@ tr_event_defs(TrKind kind, int *n)
     }
     if (n) *n = c;
     return e;
+}
+
+int
+tr_widget_add_event(TrWidget *w, const char *name)
+{
+    int i;
+    if (!w || !name || name[0] == '\0') return -1;
+    for (i = 0; i < w->nevents; i++) {
+        if (strcmp(w->events[i].name, name) == 0) return i;
+    }
+    if (w->nevents >= TR_EVENTS_MAX) return -1;
+    memset(&w->events[w->nevents], 0, sizeof w->events[0]);
+    if (tr_copy_cap(w->events[w->nevents].name, sizeof w->events[0].name, name) != 0)
+        return -1;
+    return w->nevents++;
 }
 
 static int

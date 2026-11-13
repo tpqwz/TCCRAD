@@ -95,43 +95,50 @@ offside_bin(char *dst, size_t cap)
     return tr_copy_cap(dst, cap, "offside");
 }
 
-int
-tr_spaced_emit(const char *text, size_t n, char **out, size_t *out_len, char *err, size_t errcap)
+static int
+spawn_wait_ex(char *const argv[], const char *dir, char *log, size_t logcap,
+    int *exit_code, int timeout_ms, int keep_err);
+
+static int
+offside_convert(const char *cmd, const char *ext, const char *text, size_t n,
+    char **out, size_t *out_len, char *err, size_t errcap)
 {
     char bin[TR_PATH_MAX];
     char path[64];
     char *buf;
     char *av[8];
     int code = -1;
-    size_t cap = 65536;
+    size_t cap;
     int nw;
+    int argc;
     if (out) *out = NULL;
     if (out_len) *out_len = 0;
     if (err && errcap) err[0] = '\0';
-    if (!text || !out || n > 32768) {
-        if (err && errcap) tr_copy_cap(err, errcap, "spaced C region is too large");
+    if (!cmd || !ext || !text || !out || n > 2u * 1024u * 1024u) {
+        if (err && errcap) tr_copy_cap(err, errcap, "spaced C text is too large");
         return -1;
     }
     if (offside_bin(bin, sizeof bin) != 0) return -1;
-    nw = snprintf(path, sizeof path, "/tmp/tccrad-space-%ld.csp", (long)getpid());
+    nw = snprintf(path, sizeof path, "/tmp/tccrad-%s-%ld%s", cmd, (long)getpid(), ext);
     if (nw < 0 || (size_t)nw >= sizeof path) return -1;
     {
         char *file;
-        size_t fn = n;
         int extra = (n == 0 || text[n - 1] != '\n') ? 1 : 0;
         file = malloc(n + (size_t)extra + 1);
         if (!file) return -1;
         if (n > 0) memcpy(file, text, n);
         if (extra) file[n] = '\n';
         file[n + (size_t)extra] = '\0';
-        fn = n + (size_t)extra;
-        if (tr_write_file(path, file, fn) != 0) {
+        if (tr_write_file(path, file, n + (size_t)extra) != 0) {
             free(file);
             if (err && errcap) tr_copy_cap(err, errcap, "could not write the spaced C fragment");
             return -1;
         }
         free(file);
     }
+    cap = n * 4u + 4096u;
+    if (cap < 65536u) cap = 65536u;
+    if (cap > 2u * 1024u * 1024u) cap = 2u * 1024u * 1024u;
     buf = malloc(cap);
     if (!buf) {
         unlink(path);
@@ -139,13 +146,14 @@ tr_spaced_emit(const char *text, size_t n, char **out, size_t *out_len, char *er
     }
     buf[0] = '\0';
     av[0] = bin;
-    av[1] = "emit";
+    av[1] = (char *)cmd;
     av[2] = path;
-    av[3] = "--plain";
-    av[4] = "--lang";
-    av[5] = "c";
-    av[6] = NULL;
-    if (tr_spawn_wait(av, "/tmp", buf, cap, &code, 10000) != 0 || code != 0) {
+    argc = 3;
+    if (strcmp(cmd, "emit") == 0) av[argc++] = "--plain";
+    av[argc++] = "--lang";
+    av[argc++] = "c";
+    av[argc] = NULL;
+    if (spawn_wait_ex(av, "/tmp", buf, cap, &code, 20000, 0) != 0 || code != 0) {
         free(buf);
         unlink(path);
         if (err && errcap) tr_copy_cap(err, errcap, "spaced C needs the offside command");
@@ -154,7 +162,7 @@ tr_spaced_emit(const char *text, size_t n, char **out, size_t *out_len, char *er
     unlink(path);
     if (buf[0] == '\0' || strlen(buf) + 1 >= cap) {
         free(buf);
-        if (err && errcap) tr_copy_cap(err, errcap, "spaced C produced no host code");
+        if (err && errcap) tr_copy_cap(err, errcap, "spaced C produced no code");
         return -1;
     }
     *out = buf;
@@ -162,13 +170,26 @@ tr_spaced_emit(const char *text, size_t n, char **out, size_t *out_len, char *er
     return 0;
 }
 
+int
+tr_spaced_emit(const char *text, size_t n, char **out, size_t *out_len, char *err, size_t errcap)
+{
+    return offside_convert("emit", ".sc", text, n, out, out_len, err, errcap);
+}
+
+int
+tr_spaced_space(const char *text, size_t n, char **out, size_t *out_len, char *err, size_t errcap)
+{
+    return offside_convert("space", ".c", text, n, out, out_len, err, errcap);
+}
+
 static int
-spawn_common(char *const argv[], const char *dir, int logfd, pid_t *pid)
+spawn_common(char *const argv[], const char *dir, int logfd, int keep_err, pid_t *pid)
 {
     posix_spawn_file_actions_t fa;
     posix_spawnattr_t attr;
     int rc;
     int i;
+    int errfd = -1;
     if (!argv || !argv[0] || !pid) return -1;
     for (i = 0; argv[i]; i++) {
         if (!tr_argv_ok(argv[i])) return -1;
@@ -186,8 +207,14 @@ spawn_common(char *const argv[], const char *dir, int logfd, pid_t *pid)
         }
     }
     if (logfd >= 0) {
+        errfd = logfd;
+        if (!keep_err) {
+            errfd = open("/dev/null", O_WRONLY);
+            if (errfd < 0) errfd = logfd;
+        }
         if (posix_spawn_file_actions_adddup2(&fa, logfd, STDOUT_FILENO) != 0 ||
-            posix_spawn_file_actions_adddup2(&fa, logfd, STDERR_FILENO) != 0) {
+            posix_spawn_file_actions_adddup2(&fa, errfd, STDERR_FILENO) != 0) {
+            if (errfd != logfd) close(errfd);
             posix_spawnattr_destroy(&attr);
             posix_spawn_file_actions_destroy(&fa);
             return -1;
@@ -195,19 +222,21 @@ spawn_common(char *const argv[], const char *dir, int logfd, pid_t *pid)
     }
     if (posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP) != 0 ||
         posix_spawnattr_setpgroup(&attr, 0) != 0) {
+        if (errfd >= 0 && errfd != logfd) close(errfd);
         posix_spawnattr_destroy(&attr);
         posix_spawn_file_actions_destroy(&fa);
         return -1;
     }
     rc = posix_spawnp(pid, argv[0], &fa, &attr, argv, environ);
+    if (errfd >= 0 && errfd != logfd) close(errfd);
     posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
     return rc == 0 ? 0 : -1;
 }
 
-int
-tr_spawn_wait(char *const argv[], const char *dir, char *log, size_t logcap,
-    int *exit_code, int timeout_ms)
+static int
+spawn_wait_ex(char *const argv[], const char *dir, char *log, size_t logcap,
+    int *exit_code, int timeout_ms, int keep_err)
 {
     char tmpl[] = "/tmp/tccrad-log-XXXXXX";
     int fd;
@@ -218,7 +247,7 @@ tr_spawn_wait(char *const argv[], const char *dir, char *log, size_t logcap,
     if (log && logcap) log[0] = '\0';
     fd = mkstemp(tmpl);
     if (fd < 0) return -1;
-    if (spawn_common(argv, dir, fd, &pid) != 0) {
+    if (spawn_common(argv, dir, fd, keep_err, &pid) != 0) {
         close(fd);
         unlink(tmpl);
         return -1;
@@ -264,6 +293,13 @@ tr_spawn_wait(char *const argv[], const char *dir, char *log, size_t logcap,
 }
 
 int
+tr_spawn_wait(char *const argv[], const char *dir, char *log, size_t logcap,
+    int *exit_code, int timeout_ms)
+{
+    return spawn_wait_ex(argv, dir, log, logcap, exit_code, timeout_ms, 1);
+}
+
+int
 tr_spawn_async(char *const argv[], const char *dir, const char *logfile, pid_t *pid)
 {
     int fd = -1;
@@ -274,7 +310,7 @@ tr_spawn_async(char *const argv[], const char *dir, const char *logfile, pid_t *
         fd = open(logfile, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0644);
         if (fd < 0) return -1;
     }
-    if (spawn_common(argv, dir, fd, &child) != 0) {
+    if (spawn_common(argv, dir, fd, 1, &child) != 0) {
         if (fd >= 0) close(fd);
         return -1;
     }
@@ -492,6 +528,19 @@ push_arg(char **argv, int *argc, int cap, char *s)
 }
 
 static int
+absolute_path(char *dst, size_t cap, const char *path)
+{
+    char cwd[TR_PATH_MAX];
+    int n;
+    if (!path || path[0] == '\0' || !dst || cap < 2) return -1;
+    if (path[0] == '/') return tr_copy_cap(dst, cap, path);
+    if (getcwd(cwd, sizeof cwd) == NULL) return -1;
+    n = snprintf(dst, cap, "%s/%s", cwd, path);
+    if (n < 0 || (size_t)n >= cap) return -1;
+    return 0;
+}
+
+static int
 ensure_dir(const char *path)
 {
     struct stat st;
@@ -526,10 +575,16 @@ tr_project_build(const TrDoc *doc, const TrStyle *style, const char *out_dir,
     int timeout_ms = 60000;
     char defbuf[32];
     const char *compiler = (tcc && tcc[0]) ? tcc : "tcc";
+    char out_abs[TR_PATH_MAX];
     memset(&lvsrc, 0, sizeof lvsrc);
     memset(stack_argv, 0, sizeof stack_argv);
     if (child) *child = 0;
     if (!doc || !out_dir || !runtime_dir || !third_dir) return -1;
+    if (absolute_path(out_abs, sizeof out_abs, out_dir) != 0) {
+        if (log && logcap) tr_copy_cap(log, logcap, "build directory path is not usable");
+        return -1;
+    }
+    out_dir = out_abs;
     if (!tr_argv_ok(compiler) || !tr_argv_ok(out_dir) || !tr_argv_ok(runtime_dir) ||
         !tr_argv_ok(third_dir))
         return -1;

@@ -80,6 +80,22 @@ shortcut(Ide *ide, XEvent *ev)
     return 0;
 }
 
+static unsigned long
+scheme_pixel(Display *dpy, int screen, int scheme)
+{
+    XColor xc;
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    ide_scheme_bg(scheme, &r, &g, &b);
+    xc.red = (unsigned short)((unsigned)r * 257u);
+    xc.green = (unsigned short)((unsigned)g * 257u);
+    xc.blue = (unsigned short)((unsigned)b * 257u);
+    xc.flags = DoRed | DoGreen | DoBlue;
+    if (XAllocColor(dpy, DefaultColormap(dpy, screen), &xc)) return xc.pixel;
+    return scheme == IDE_SCHEME_LIGHT ? WhitePixel(dpy, screen) : BlackPixel(dpy, screen);
+}
+
 static int
 screen_dpi(Display *dpy, int screen)
 {
@@ -148,6 +164,8 @@ main(int argc, char **argv)
     int running = 1;
     int font_pct = 100;
     int font_failed = 0;
+    int shown_scheme = -1;
+    unsigned long bg_pixel = 0;
     unsigned width = 1280;
     unsigned height = 800;
     dpy = XOpenDisplay(NULL);
@@ -174,7 +192,9 @@ main(int argc, char **argv)
     }
     if (width < 640u) width = 640u;
     if (height < 480u) height = 480u;
-    win = XCreateSimpleWindow(dpy, root, 40, 40, width, height, 0, 0, 0);
+    bg_pixel = scheme_pixel(dpy, screen, ide->scheme);
+    shown_scheme = ide->scheme;
+    win = XCreateSimpleWindow(dpy, root, 40, 40, width, height, 0, 0, bg_pixel);
     XStoreName(dpy, win, "TCCRAD");
     {
         Atom wm = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
@@ -187,7 +207,7 @@ main(int argc, char **argv)
     {
         XSetWindowAttributes attr;
         attr.bit_gravity = NorthWestGravity;
-        attr.background_pixel = BlackPixel(dpy, screen);
+        attr.background_pixel = bg_pixel;
         XChangeWindowAttributes(dpy, win, CWBitGravity | CWBackPixel, &attr);
     }
     font = ui_font(dpy, font_pct);
@@ -239,7 +259,18 @@ main(int argc, char **argv)
         ide_note_disk(ide);
         ide_frame(ctx, ide, (int)width, (int)height);
         ide_after_frame(ide, nk_item_is_any_active(ctx) ? 1 : 0);
-        nk_xlib_render(win, nk_rgb(18, 18, 18));
+        if (ide->scheme != shown_scheme) {
+            bg_pixel = scheme_pixel(dpy, screen, ide->scheme);
+            XSetWindowBackground(dpy, win, bg_pixel);
+            shown_scheme = ide->scheme;
+        }
+        {
+            unsigned char cr;
+            unsigned char cg;
+            unsigned char cb;
+            ide_scheme_bg(ide->scheme, &cr, &cg, &cb);
+            nk_xlib_render(win, nk_rgb(cr, cg, cb));
+        }
         XFlush(dpy);
         {
             struct timespec tr_sl;

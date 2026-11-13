@@ -167,6 +167,7 @@ int tr_kind_is_window(TrKind kind);
 int tr_kind_is_container(TrKind kind);
 const TrPropDef *tr_prop_defs(TrKind kind, int *n);
 const char *const *tr_event_defs(TrKind kind, int *n);
+int tr_widget_add_event(TrWidget *w, const char *name);
 
 int tr_doc_add_widget(TrDoc *doc, int parent_id, TrKind kind, const char *name);
 int tr_doc_delete(TrDoc *doc, int id);

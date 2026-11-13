@@ -5,7 +5,7 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
 	-D_FORTIFY_SOURCE=2 -fstack-protector-strong
 INCLUDES := -I src -I runtime -I third_party
 XFT_CFLAGS := $(shell pkg-config --cflags xft)
-CORE := src/safe.c src/model.c src/style.c src/codegen.c src/gen_nk.c src/gen_ret.c src/project.c src/ide.c
+CORE := src/safe.c src/model.c src/style.c src/codegen.c src/gen_nk.c src/gen_ret.c src/project.c src/rope.c src/ide.c src/report.c
 
 .PHONY: all test tcc clean
 
@@ -23,7 +23,7 @@ build/test_core: tests/test_core.c $(CORE)
 	mkdir -p build
 	$(CC) $(CFLAGS) -I src -I runtime -o build/test_core tests/test_core.c \
 		src/safe.c src/model.c src/style.c src/codegen.c src/gen_nk.c src/gen_ret.c \
-		src/ide.c src/project.c
+		src/ide.c src/project.c src/rope.c src/report.c
 
 test: build/test_core build/TCCRAD
 	mkdir -p /tmp/tccrad-test

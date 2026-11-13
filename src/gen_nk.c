@@ -27,7 +27,7 @@ call_ev(Gen *g, const TrWidget *w, const char *ev, int d)
 {
     const TrEvent *e = cg_event(w, ev);
     char hn[TR_NAME_MAX];
-    if (!e) return 0;
+    if (!e || !cg_event_armed(g->doc, w, e)) return 0;
     if (cg_handler(g->doc, w, e, hn, sizeof hn) != 0) return cg_err(g, "handler name is invalid");
     return cg_gi(g, d, "%s(ui);\n", hn);
 }
@@ -129,7 +129,10 @@ nk_leaf_label(Gen *g, const TrWidget *w, int d)
 {
     if (cg_gi(g, d, "nk_label(ctx, ") != 0) return -1;
     if (cg_text(g, w, "text") != 0) return -1;
-    return cg_gp(g, ", %s);\n", nk_align(w));
+    if (cg_gp(g, ", %s);\n", nk_align(w)) != 0) return -1;
+    if (!cg_event_armed(g->doc, w, cg_event(w, "click"))) return 0;
+    if (cg_gi(g, d, "if (nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT))\n") != 0) return -1;
+    return call_ev(g, w, "click", d + 1);
 }
 
 static int
@@ -519,6 +522,7 @@ nk_menu(Gen *g, const TrWidget *bar, int d)
     nm = tr_child_indices(g->doc, bar->id, menus, TR_WIDGETS_MAX);
     if (nm < 0) return -1;
     if (nm == 0) return 0;
+    if (cg_gi(g, d, "/* @tccrad w %d */\n", bar->id) != 0) return -1;
     if (cg_gi(g, d, "nk_menubar_begin(ctx);\n") != 0) return -1;
     if (cg_gi(g, d, "nk_layout_row_begin(ctx, NK_STATIC, 25, %d);\n", nm) != 0) return -1;
     for (i = 0; i < nm; i++) {
@@ -529,12 +533,14 @@ nk_menu(Gen *g, const TrWidget *bar, int d)
         ni = tr_child_indices(g->doc, menu->id, items, TR_WIDGETS_MAX);
         if (ni < 0) return -1;
         if (cg_gi(g, d, "nk_layout_row_push(ctx, 120);\n") != 0) return -1;
+        if (cg_gi(g, d, "/* @tccrad w %d */\n", menu->id) != 0) return -1;
         if (cg_gi(g, d, "if (nk_menu_begin_label(ctx, ") != 0) return -1;
         if (cg_text(g, menu, "label") != 0) return -1;
         if (cg_gp(g, ", NK_TEXT_LEFT, nk_vec2(180, 240))) {\n") != 0) return -1;
         if (cg_gi(g, d + 1, "nk_layout_row_dynamic(ctx, 25, 1);\n") != 0) return -1;
         for (k = 0; k < ni; k++) {
             const TrWidget *it = &g->doc->widgets[items[k]];
+            if (cg_gi(g, d + 1, "/* @tccrad w %d */\n", it->id) != 0) return -1;
             if (cg_gi(g, d + 1, "if (nk_menu_item_label(ctx, ") != 0) return -1;
             if (cg_text(g, it, "label") != 0) return -1;
             if (cg_gp(g, ", NK_TEXT_LEFT)) {\n") != 0) return -1;
@@ -597,6 +603,7 @@ static int
 nk_body(Gen *g, const TrWidget *w, int d)
 {
     if (d > 32) return cg_err(g, "widget nesting is too deep");
+    if (cg_gi(g, d, "/* @tccrad w %d */\n", w->id) != 0) return -1;
     switch (w->kind) {
     case TR_KIND_LABEL: return nk_leaf_label(g, w, d);
     case TR_KIND_BUTTON: return nk_leaf_button(g, w, d);
@@ -631,7 +638,10 @@ nk_body(Gen *g, const TrWidget *w, int d)
     case TR_KIND_IMAGE:
         if (cg_gi(g, d, "nk_label(ctx, ") != 0) return -1;
         if (cg_text(g, w, "path") != 0) return -1;
-        return cg_gp(g, ", NK_TEXT_LEFT);\n");
+        if (cg_gp(g, ", NK_TEXT_LEFT);\n") != 0) return -1;
+        if (!cg_event_armed(g->doc, w, cg_event(w, "click"))) return 0;
+        if (cg_gi(g, d, "if (nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT))\n") != 0) return -1;
+        return call_ev(g, w, "click", d + 1);
     case TR_KIND_CUSTOM: {
         char hn[TR_NAME_MAX];
         const TrEvent *ev = cg_event(w, "draw");

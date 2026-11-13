@@ -34,6 +34,7 @@ int cg_region(Gen *g, const char *tag, TrSpan sp, const char *fallback);
 int cg_int_slot(Gen *g, const TrWidget *w, const char *key, CgSlot *s);
 int cg_handler(const TrDoc *doc, const TrWidget *w, const TrEvent *ev, char *dst, size_t cap);
 const TrEvent *cg_event(const TrWidget *w, const char *name);
+int cg_event_armed(const TrDoc *doc, const TrWidget *w, const TrEvent *ev);
 int cg_nk(Gen *g);
 int cg_libui(Gen *g);
 int cg_lvgl(Gen *g);

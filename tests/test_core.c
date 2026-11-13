@@ -2,10 +2,14 @@
 #include "codegen.h"
 #include "style.h"
 #include "ide.h"
+#include "rope.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int fails;
 
@@ -76,6 +80,16 @@ test_codegen(const char *dir)
     int id;
     TrWidget *w;
     tr_doc_blank(doc);
+    {
+        int wi;
+        for (wi = 0; wi < doc->nwidgets; wi++) {
+            if (doc->widgets[wi].kind == TR_KIND_BUTTON && doc->widgets[wi].nevents > 0) {
+                tr_copy_cap(doc->widgets[wi].events[0].handler,
+                    sizeof doc->widgets[wi].events[0].handler, "OkClick");
+                break;
+            }
+        }
+    }
     w = tr_doc_widget(doc, 3);
     if (w) tr_prop_set(w, "password", "1");
     id = tr_doc_add_widget(doc, 1, TR_KIND_SLIDER, "volume");
@@ -171,6 +185,24 @@ test_nav(void)
 }
 
 static void
+test_rope(void)
+{
+    struct TrRope *r = tr_rope_new("abcd", 4);
+    char *s;
+    size_t n = 0;
+    expect(tr_rope_len(r) == 4, "rope len");
+    expect(tr_rope_insert(&r, 2, "XY", 2) == 0, "rope insert");
+    s = tr_rope_flat(r, &n);
+    expect(s && n == 6 && strcmp(s, "abXYcd") == 0, "rope flat");
+    free(s);
+    expect(tr_rope_delete(&r, 2, 2) == 0, "rope delete");
+    s = tr_rope_flat(r, &n);
+    expect(s && strcmp(s, "abcd") == 0, "rope restored");
+    free(s);
+    tr_rope_free(r);
+}
+
+static void
 test_scope(void)
 {
     int depth = 0;
@@ -182,6 +214,37 @@ test_scope(void)
     expect(depth == 0, "close decreases");
     expect(ide_scope_show("char s[] = \"{\";", &depth) == 0, "string brace ignored");
     expect(depth == 0, "string does not nest");
+    {
+        char g[48];
+        depth = 0;
+        expect(ide_scope_gutter("void f(void) {", &depth, g, sizeof g) == 0, "gutter open");
+        expect(depth == 1, "gutter depth");
+        expect(strstr(g, "\xE2\x94\x8C") != NULL, "ida top");
+        expect(ide_scope_gutter("    return;", &depth, g, sizeof g) == 0, "gutter mid");
+        expect(strstr(g, "\xE2\x94\x82") != NULL, "ida bar");
+        expect(ide_scope_gutter("}", &depth, g, sizeof g) == 0, "gutter close");
+        expect(depth == 0, "gutter closed");
+        expect(strstr(g, "\xE2\x94\x94") != NULL, "ida end");
+    }
+    {
+        char dir[] = "/tmp/tccrad-def";
+        char rt[128];
+        char path[256];
+        int ln = -1;
+        FILE *fp;
+        mkdir("/tmp/tccrad-def", 0700);
+        mkdir("/tmp/tccrad-def/runtime", 0700);
+        snprintf(rt, sizeof rt, "/tmp/tccrad-def/runtime/tccrad.h");
+        fp = fopen(rt, "w");
+        expect(fp != NULL, "def file");
+        if (fp) {
+            fputs("int foo(int n)\n{\n    return n;\n}\n", fp);
+            fclose(fp);
+        }
+        expect(ide_find_def(dir, NULL, "foo", path, sizeof path, &ln) == 1, "found foo");
+        expect(ln == 0, "foo line");
+        expect(ide_find_def(dir, NULL, "missing_zz", path, sizeof path, &ln) == 0, "missing def");
+    }
 }
 
 static void
@@ -201,6 +264,55 @@ test_jump(void)
     expect(w && ide_primary_event(w) >= 0, "click is the handler");
     expect(w && ide_handler_name(doc, w, name, sizeof name) == 0, "handler name");
     expect(w && strcmp(name, "App_ok_btn_click") == 0, "default handler");
+    {
+        int nd = 0;
+        const char *const *ev = tr_event_defs(TR_KIND_LABEL, &nd);
+        int lid;
+        TrWidget *lab;
+        expect(ev && nd >= 1 && strcmp(ev[0], "click") == 0, "label can click");
+        lid = tr_doc_add_widget(doc, doc->widgets[0].id, TR_KIND_LABEL, "cap_lbl");
+        lab = tr_doc_widget(doc, lid);
+        expect(lab && ide_primary_event(lab) >= 0, "label has a click slot");
+        expect(lab && ide_handler_name(doc, lab, name, sizeof name) == 0, "label handler");
+        expect(lab && strcmp(name, "App_cap_lbl_click") == 0, "label click name");
+    }
+    {
+        Ide *ide = ide_new();
+        expect(ide != NULL, "ensure ide");
+        if (ide) {
+            tr_doc_free(ide->doc);
+            ide->doc = doc;
+            doc = NULL;
+            expect(ide_ensure_handler(ide, w->id) == 0, "create click");
+            expect(strcmp(w->events[ide_primary_event(w)].handler, "App_ok_btn_click") == 0,
+                "handler stored");
+            expect(tr_span_ptr(ide->doc, w->events[ide_primary_event(w)].user)[0] != '\0',
+                "empty body created");
+            ide_free(ide);
+        }
+    }
+    {
+        const char *src =
+            "void on_run(Bench *ui);\n"
+            "/* @tccrad w 25 */\n"
+            "nk_label(ctx, \"Operator\", NK_TEXT_LEFT);\n"
+            "void on_run(Bench *ui)\n"
+            "{\n"
+            "/* @tccrad user event 36 click */\n"
+            "    ui->passes++;\n"
+            "/* @end user */\n"
+            "}\n";
+        const char *body = strstr(src, "ui->passes");
+        expect(ide_code_jump_line(src, "on_run", 36, "click") == 6, "jump user body");
+        expect(ide_code_jump_line(src, "on_run", 0, NULL) == 5, "jump inside definition");
+        expect(ide_code_jump_line(src, NULL, 25, NULL) == 1, "jump widget");
+        expect(ide_def_line(src, "on_run") == 3, "definition not prototype");
+        expect(body && ide_user_writable(src, (size_t)(body - src), 0) == 1, "body writable");
+        expect(ide_user_writable(src, 0, 0) == 0, "prototype locked");
+        expect(ide_user_writable("int x;\n", 0, 0) == 1, "plain file writable");
+        expect(ide_user_writable(src, (size_t)(strstr(src, "/* @end") - src), 1) == 0,
+            "marker not deleted");
+    }
     tr_doc_free(doc);
 }
 
@@ -217,6 +329,271 @@ test_ui_pct(void)
     expect(ide_ui_default_pct(800, 0) == 100, "short screen");
     expect(ide_ui_default_pct(1080, 192) == 200, "192 dpi");
     expect(ide_ui_default_pct(2160, 96) == 250, "2160");
+    expect(ide_scheme_from_text("dark") == IDE_SCHEME_DARK, "scheme dark");
+    expect(ide_scheme_from_text("light") == IDE_SCHEME_LIGHT, "scheme light");
+    expect(ide_scheme_from_text("Light") < 0, "scheme case");
+    expect(ide_scheme_from_text("dark\n") < 0, "scheme newline");
+    expect(ide_scheme_from_text("") < 0, "scheme empty");
+    expect(ide_scheme_from_text(NULL) < 0, "scheme null");
+    {
+        unsigned char r = 0;
+        unsigned char g = 0;
+        unsigned char b = 0;
+        ide_scheme_bg(IDE_SCHEME_DARK, &r, &g, &b);
+        expect(r == 18 && g == 18 && b == 18, "dark clear");
+        ide_scheme_bg(IDE_SCHEME_LIGHT, &r, &g, &b);
+        expect(r == 245 && g == 245 && b == 245, "light clear");
+    }
+}
+
+static void
+test_build_relative(void)
+{
+    TrDoc *doc = tr_doc_new();
+    TrStyle style;
+    char back[TR_PATH_MAX];
+    char runtime[TR_PATH_MAX];
+    char third[TR_PATH_MAX];
+    char log[2048];
+    int n;
+    log[0] = '\0';
+    expect(getcwd(back, sizeof back) != NULL, "cwd");
+    expect(doc != NULL, "relative doc");
+    if (!doc || back[0] == '\0') {
+        tr_doc_free(doc);
+        return;
+    }
+    tr_doc_blank(doc);
+    tr_style_defaults(&style, "default");
+    n = snprintf(runtime, sizeof runtime, "%s/runtime", back);
+    expect(n > 0 && (size_t)n < sizeof runtime, "runtime path");
+    n = snprintf(third, sizeof third, "%s/third_party", back);
+    expect(n > 0 && (size_t)n < sizeof third, "third path");
+    if (mkdir("/tmp/tccrad-relcwd", 0700) != 0 && errno != EEXIST) {
+        expect(0, "mkdir relative out");
+        tr_doc_free(doc);
+        return;
+    }
+    unlink("/tmp/tccrad-relcwd/app");
+    expect(chdir("/tmp") == 0, "chdir tmp");
+    expect(tr_project_build(doc, &style, "tccrad-relcwd", runtime, third, "tcc",
+            log, sizeof log, 0, NULL) == 0, "relative out builds");
+    if (log[0] != '\0') fprintf(stderr, "relative build: %s\n", log);
+    expect(access("/tmp/tccrad-relcwd/app", X_OK) == 0, "relative out binary");
+    expect(chdir(back) == 0, "restore cwd");
+    tr_doc_free(doc);
+}
+
+static void
+test_report(void)
+{
+    const char *src =
+        "void foo(void)\n"
+        "{\n"
+        "    if (x) gets(b);\n"
+        "}\n"
+        "void bar(void)\n"
+        "{\n"
+        "    foo();\n"
+        "    foo();\n"
+        "    printf(\"ok\");\n"
+        "}\n";
+    const char *nest =
+        "void nest(void)\n"
+        "{\n"
+        "    if (a) {\n"
+        "        while (b) {\n"
+        "        }\n"
+        "    }\n"
+        "}\n";
+    TrExplore ex[4];
+    TrExplore one[1];
+    TrFinding f[8];
+    int n;
+    int m;
+    int gets_line = -1;
+    int i;
+    n = tr_explore(src, ex, 4);
+    expect(n == 2, "two routines");
+    expect(n == 2 && ex[0].complexity >= 2, "foo decides");
+    expect(n == 2 && ex[0].lines == 4, "foo lines");
+    expect(n == 2 && ex[0].depth == 1, "foo depth");
+    expect(n == 2 && ex[1].fan_out == 1, "bar calls out");
+    expect(n == 2 && ex[0].fan_in == 1, "foo is called");
+    expect(n == 2 && ex[0].ncallers == 1 && strcmp(ex[ex[0].callers[0]].name, "bar") == 0,
+        "caller is bar");
+    expect(n == 2 && ex[0].caller_line[0] == 6, "call site line");
+    expect(n == 2 && ex[1].ncallees == 1 && ex[1].callee_line[0] == 6, "callee line");
+    expect(tr_explore(src, one, 1) == 1, "cap one routine");
+    n = tr_explore(nest, ex, 4);
+    expect(n == 1 && ex[0].depth == 3, "nest depth");
+    expect(n == 1 && ex[0].complexity >= 3, "nest decides");
+    expect(n == 1 && ex[0].ndecide >= 2 && strcmp(ex[0].decide[0], "if") == 0, "first decision");
+    expect(n == 1 && strcmp(ex[0].decide[1], "while") == 0 && ex[0].decide_line[1] == 3,
+        "while decision");
+    expect(n == 1 && ex[0].decide_depth[0] == 0 && ex[0].decide_depth[1] == 1,
+        "decision nesting");
+    {
+        char many[320];
+        int k;
+        TrFinding hit;
+        char row[96];
+        snprintf(many, sizeof many, "void many(void)\n{\n    ");
+        for (k = 0; k < 17; k++) snprintf(many + strlen(many), sizeof many - strlen(many), "if(a)");
+        snprintf(many + strlen(many), sizeof many - strlen(many), ";\n}\n");
+        n = tr_explore(many, ex, 4);
+        expect(n == 1 && ex[0].ndecide == 16 && ex[0].ndecide_all == 17, "decision cap");
+        memset(&hit, 0, sizeof hit);
+        hit.line = 1;
+        hit.severity = 3;
+        memcpy(hit.checker, "security.gets", 14);
+        expect(tr_find_row(&hit, "void f(void)\n    gets(b);\n", row, sizeof row) == 0 &&
+            strcmp(row, "find  high  security.gets  2  gets(b);") == 0, "find row");
+    }
+    {
+        const char *hands =
+            "void Bench_build(void)\n"
+            "{\n"
+            "    if (a) return;\n"
+            "}\n"
+            "void on_run(void)\n"
+            "{\n"
+            "    /* @tccrad user event 1 click */\n"
+            "}\n";
+        n = tr_explore(hands, ex, 4);
+        expect(n == 2 && ex[0].user == 0, "build is generated");
+        expect(n == 2 && ex[1].user == 1, "on_run is a handler");
+    }
+    m = tr_check(src, f, 8);
+    for (i = 0; i < m; i++) {
+        if (strcmp(f[i].checker, "security.gets") == 0) gets_line = f[i].line;
+    }
+    expect(gets_line == 2, "gets line");
+    expect(tr_check("void f(void)\n{\n    printf(\"ok\");\n}\n", f, 8) == 0, "literal format");
+    expect(tr_check("void f(void)\n{\n    printf(buf);\n}\n", f, 8) == 1, "open format");
+    expect(tr_check("void f(void)\n{\n    fprintf(stderr, \"ok\");\n}\n", f, 8) == 0,
+        "fprintf literal");
+    expect(tr_check("void f(void)\n{\n    snprintf(d, n, \"ok\");\n}\n", f, 8) == 0,
+        "snprintf literal");
+    expect(tr_check("void f(void)\n{\n    snprintf(d, n, fmt);\n}\n", f, 8) == 1,
+        "snprintf format");
+    expect(tr_check("void f(void)\n{\n    snprintf(d, n,\n        \"ok\");\n}\n", f, 8) == 0,
+        "snprintf split literal");
+    expect(tr_check("void f(void)\n{\n    scanf(\"%s\", b);\n}\n", f, 8) == 1, "scanf s");
+    expect(tr_check("void f(void)\n{\n    scanf(\"%12s\", b);\n}\n", f, 8) == 0, "scanf width");
+    expect(tr_check("void f(void)\n{\n    // gets(b);\n}\n", f, 8) == 0, "comment gets");
+    expect(tr_check("    // gets(b);\n", f, 8) == 0, "indented comment");
+    expect(tr_check("void f(void)\n{\n    strcpy(a, b); printf(buf);\n}\n", f, 8) == 2,
+        "two findings");
+    expect(tr_check("void f(void)\n{\n    gets(b); /* @tccrad ignore security.gets */\n}\n",
+        f, 8) == 0, "ignore gets");
+    expect(tr_check("void f(void)\n{\n    // @tccrad ignore\n    gets(b);\n}\n", f, 8) == 0,
+        "ignore next line");
+    expect(tr_check("void f(void)\n{\n    gets(b); /* @tccrad ignore security.strcpy */\n}\n",
+        f, 8) == 1, "ignore other checker");
+    expect(tr_check("void f(void)\n{\n    gets(b); /* @tccrad ignore */\n    strcpy(a, b);\n}\n",
+        f, 8) == 1, "ignore stays on its line");
+    {
+        const char *both =
+            "void shared(void)\n"
+            "{\n"
+            "}\n"
+            "#if defined(__GNUC__) || defined(__clang__)\n"
+            "#define TR_MAYBE_UNUSED\n"
+            "#else\n"
+            "#define TR_MAYBE_UNUSED\n"
+            "#endif\n"
+            "#if TCCRAD_BACKEND == TCCRAD_BACKEND_NUKLEAR\n"
+            "void nk_only(void)\n"
+            "{\n"
+            "}\n"
+            "#elif TCCRAD_BACKEND == TCCRAD_BACKEND_LIBUI\n"
+            "void ui_only(void)\n"
+            "{\n"
+            "    gets(b);\n"
+            "}\n"
+            "#endif\n";
+        char *nk = tr_backend_view(both, 1);
+        char *ui = tr_backend_view(both, 2);
+        char line[32];
+        expect(nk != NULL && ui != NULL, "backend view");
+        if (nk && ui) {
+            n = tr_explore(nk, ex, 4);
+            expect(n == 2 && strcmp(ex[1].name, "nk_only") == 0, "nuklear routines");
+            n = tr_explore(ui, ex, 4);
+            expect(n == 2 && strcmp(ex[1].name, "ui_only") == 0, "libui routines");
+            expect(n == 2 && ex[1].line == 13, "libui line");
+            expect(tr_check(nk, f, 8) == 0, "nuklear has no gets");
+            expect(tr_check(ui, f, 8) == 1 && f[0].line == 15, "libui gets line");
+            expect(tr_line_text(ui, f[0].line, line, sizeof line) == 0 &&
+                strcmp(line, "gets(b);") == 0, "finding source");
+        }
+        free(nk);
+        free(ui);
+    }
+}
+
+static void
+test_spaced_view(void)
+{
+    const char *host =
+        "int main(void)\n"
+        "{\n"
+        "    if (x)\n"
+        "        return 1;\n"
+        "    return 0;\n"
+        "}\n";
+    char *spaced = NULL;
+    char *back = NULL;
+    size_t sn = 0;
+    size_t bn = 0;
+    char err[160];
+    int next = 0;
+    err[0] = '\0';
+    expect(tr_spaced_space(host, strlen(host), &spaced, &sn, err, sizeof err) == 0, "space host");
+    expect(spaced != NULL && strchr(spaced, ':') != NULL, "space has a colon");
+    expect(spaced && strstr(spaced, "return") != NULL, "space keeps return");
+    if (spaced)
+        expect(tr_spaced_emit(spaced, strlen(spaced), &back, &bn, err, sizeof err) == 0,
+            "emit spaced");
+    expect(back != NULL && strchr(back, '{') != NULL, "emit has a brace");
+    expect(back && strstr(back, "main") != NULL, "emit keeps main");
+    expect(ide_code_token("if (x):", 0, 1, &next) == 4, "if is a keyword");
+    expect(ide_code_token("if (x):", 6, 1, &next) == 5 && next == 7, "spaced colon");
+    expect(ide_code_token("if (x):", 6, 0, &next) == 0, "host colon stays plain");
+    expect(ide_code_token("/* note */ x", 0, 1, &next) == 1 && next == 10, "block comment");
+    expect(ide_code_token("#include <stdio.h>", 0, 0, &next) == 6, "directive");
+    expect(ide_code_token("\"hi\"", 0, 1, &next) == 2, "string in spaced");
+    free(spaced);
+    free(back);
+}
+
+static void
+test_scene(void)
+{
+    Ide *ide = ide_new();
+    TrWidget *w;
+    int id;
+    expect(ide != NULL, "scene ide");
+    if (!ide) return;
+    tr_copy_cap(ide->doc->configs[0], TR_NAME_MAX, "default");
+    tr_copy_cap(ide->doc->configs[1], TR_NAME_MAX, "night");
+    ide->doc->nconfigs = 2;
+    tr_copy_cap(ide->doc->active_config, sizeof ide->doc->active_config, "default");
+    id = tr_doc_add_widget(ide->doc, ide->doc->widgets[0].id, TR_KIND_LABEL, "night_lbl");
+    w = tr_doc_widget(ide->doc, id);
+    expect(w != NULL, "scene widget");
+    if (w) tr_copy_cap(w->config, sizeof w->config, "night");
+    expect(w && ide_visible(ide, w) == 0, "night hidden on default");
+    ide_set_scene(ide, "night");
+    expect(strcmp(ide->doc->active_config, "night") == 0, "scene night");
+    expect(ide->show_all_cfg == 0, "one scene");
+    expect(w && ide_visible(ide, w) == 1, "night shown");
+    ide_show_all_scenes(ide);
+    expect(ide->show_all_cfg == 1 && w && ide_visible(ide, w) == 1, "all shows night");
+    ide_set_scene(ide, "missing");
+    expect(strcmp(ide->doc->active_config, "night") == 0, "unknown scene stays");
+    ide_free(ide);
 }
 
 static void
@@ -245,6 +622,11 @@ main(int argc, char **argv)
     test_nav();
     test_jump();
     test_scope();
+    test_rope();
+    test_report();
+    test_scene();
+    test_spaced_view();
+    test_build_relative();
     if (fails) {
         fprintf(stderr, "%d failed\n", fails);
         return 1;
