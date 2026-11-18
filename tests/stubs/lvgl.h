@@ -6,8 +6,23 @@
 typedef struct lv_obj_t lv_obj_t;
 typedef struct lv_event_t lv_event_t;
 typedef struct { uint8_t unused; } lv_color_t;
-#define LV_EVENT_CLICKED 1
-#define LV_EVENT_VALUE_CHANGED 2
+#define LV_EVENT_ALL 0
+#define LV_EVENT_PRESSED 1
+#define LV_EVENT_PRESSING 2
+#define LV_EVENT_SHORT_CLICKED 3
+#define LV_EVENT_DOUBLE_CLICKED 4
+#define LV_EVENT_CLICKED 5
+#define LV_EVENT_RELEASED 6
+#define LV_EVENT_KEY 7
+#define LV_EVENT_FOCUSED 8
+#define LV_EVENT_DEFOCUSED 9
+#define LV_EVENT_HOVER_OVER 10
+#define LV_EVENT_HOVER_LEAVE 11
+#define LV_EVENT_VALUE_CHANGED 12
+#define LV_EVENT_SIZE_CHANGED 13
+#define LV_EVENT_DRAW_POST 14
+typedef int lv_event_code_t;
+lv_event_code_t lv_event_get_code(lv_event_t *e);
 #define LV_STATE_CHECKED 1
 #define LV_ANIM_OFF 0
 #define LV_SIZE_CONTENT (-1)

@@ -103,6 +103,7 @@ tr_buf_vprintf(TrBuf *b, const char *fmt, va_list ap)
     }
     va_end(aq);
     b->len += (size_t)n;
+    if (b->len < b->cap) b->data[b->len] = '\0';
     return 0;
 }
 

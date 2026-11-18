@@ -88,7 +88,88 @@ ui_cbs(Gen *g)
     for (i = 0; i < g->doc->nwidgets; i++) {
         const TrWidget *w = &g->doc->widgets[i];
         CgSlot s;
-        if (w->kind == TR_KIND_BUTTON) {
+        if (w->kind == TR_KIND_TABLE) {
+            char parts[8][TR_TEXT_MAX];
+            int nc = 0;
+            int col;
+            if (column_names(w, parts, 8, &nc) != 0) return -1;
+            if (nc < 1) {
+                memcpy(parts[0], "Value", 6);
+                nc = 1;
+            }
+            if (cg_gp(g, "static %s *tr_tui_%d;\n", cls, w->id) != 0) return -1;
+            if (cg_gp(g, "static int tr_tnc_%d(uiTableModelHandler *mh, uiTableModel *m)\n{\n", w->id) != 0)
+                return -1;
+            if (cg_gi(g, 1, "(void)mh; (void)m;\n") != 0) return -1;
+            if (cg_gi(g, 1, "return %d;\n}\n", nc) != 0) return -1;
+            if (cg_gp(g, "static uiTableValueType tr_tty_%d(uiTableModelHandler *mh, uiTableModel *m, int column)\n{\n",
+                    w->id) != 0)
+                return -1;
+            if (cg_gi(g, 1, "(void)mh; (void)m; (void)column;\n") != 0) return -1;
+            if (cg_gi(g, 1, "return uiTableValueTypeString;\n}\n") != 0) return -1;
+            if (cg_gp(g, "static int tr_tnr_%d(uiTableModelHandler *mh, uiTableModel *m)\n{\n", w->id) != 0)
+                return -1;
+            if (cg_gi(g, 1, "int n;\n") != 0) return -1;
+            if (cg_gi(g, 1, "(void)mh; (void)m;\n") != 0) return -1;
+            if (cg_gi(g, 1, "if (!tr_tui_%d) return 0;\n", w->id) != 0) return -1;
+            if (cg_gi(g, 1, "%s *ui = tr_tui_%d;\n", cls, w->id) != 0) return -1;
+            if (cg_gi(g, 1, "(void)ui;\n") != 0) return -1;
+            if (cg_gi(g, 1, "n = ") != 0) return -1;
+            {
+                const TrProp *p = tr_prop(w, "rows");
+                char rew[512];
+                if (p && p->bind[0] && !p->twoway) {
+                    if (tr_rewrite_expr(g->doc, p->bind, rew, sizeof rew) != 0) return -1;
+                    if (cg_gp(g, "(%s);\n", rew) != 0) return -1;
+                } else if (cg_gp(g, "%d;\n", tr_prop_int(w, "rows", 3)) != 0) return -1;
+            }
+            if (cg_gi(g, 1, "if (n < 0) n = 0;\n") != 0) return -1;
+            if (cg_gi(g, 1, "if (n > 64) n = 64;\n") != 0) return -1;
+            if (cg_gi(g, 1, "return n;\n}\n") != 0) return -1;
+            if (cg_gp(g, "static uiTableValue *tr_tcell_%d(uiTableModelHandler *mh, uiTableModel *m, int row, int column)\n{\n",
+                    w->id) != 0)
+                return -1;
+            if (cg_gi(g, 1, "char cell[160];\n") != 0) return -1;
+            if (cg_gi(g, 1, "(void)mh; (void)m;\n") != 0) return -1;
+            if (cg_gi(g, 1, "cell[0] = '\\0';\n") != 0) return -1;
+            if (cg_gi(g, 1, "if (tr_tui_%d) %s_cell(tr_tui_%d, row, column, cell, sizeof cell);\n",
+                    w->id, cls, w->id) != 0)
+                return -1;
+            if (cg_gi(g, 1, "return uiNewTableValueString(cell);\n}\n") != 0) return -1;
+            if (cg_gp(g, "static void tr_tset_%d(uiTableModelHandler *mh, uiTableModel *m, int row, int column, const uiTableValue *v)\n{\n",
+                    w->id) != 0)
+                return -1;
+            if (cg_gi(g, 1, "(void)mh; (void)m; (void)row; (void)column; (void)v;\n") != 0) return -1;
+            if (cg_gi(g, 1, "}\n") != 0) return -1;
+            if (cg_gp(g, "static uiTableModelHandler tr_th_%d = {\n", w->id) != 0) return -1;
+            if (cg_gi(g, 1, "tr_tnc_%d, tr_tty_%d, tr_tnr_%d, tr_tcell_%d, tr_tset_%d\n};\n",
+                    w->id, w->id, w->id, w->id, w->id) != 0)
+                return -1;
+            if (cg_event_armed(g->doc, w, cg_event(w, "click")) ||
+                cg_event_armed(g->doc, w, cg_event(w, "select"))) {
+                if (cg_gp(g, "static void tr_tclick_%d(uiTable *t, int row, void *data)\n{\n", w->id) != 0)
+                    return -1;
+                if (cg_gi(g, 1, "%s *ui = data;\n", cls) != 0) return -1;
+                if (cg_gi(g, 1, "(void)t;\n") != 0) return -1;
+                if (cg_gi(g, 1, "if (!ui) return;\n") != 0) return -1;
+                if (cg_gi(g, 1, "ui->tr_row_%d = row;\n", w->id) != 0) return -1;
+                if (call_named(g, w, "select", 1) != 0) return -1;
+                if (call_named(g, w, "click", 1) != 0) return -1;
+                if (cg_gp(g, "}\n") != 0) return -1;
+            }
+            if (cg_event_armed(g->doc, w, cg_event(w, "dblclick"))) {
+                if (cg_gp(g, "static void tr_tdbl_%d(uiTable *t, int row, void *data)\n{\n", w->id) != 0)
+                    return -1;
+                if (cg_gi(g, 1, "%s *ui = data;\n", cls) != 0) return -1;
+                if (cg_gi(g, 1, "(void)t;\n") != 0) return -1;
+                if (cg_gi(g, 1, "if (!ui) return;\n") != 0) return -1;
+                if (cg_gi(g, 1, "ui->tr_row_%d = row;\n", w->id) != 0) return -1;
+                if (call_named(g, w, "dblclick", 1) != 0) return -1;
+                if (cg_gp(g, "}\n") != 0) return -1;
+            }
+            (void)col;
+            (void)parts;
+        } else if (w->kind == TR_KIND_BUTTON) {
             if (cg_gp(g, "static void tr_uicb_%d(uiButton *sender, void *data)\n{\n", w->id) != 0) return -1;
             if (cg_gi(g, 1, "%s *ui = (%s *)data;\n", cls, cls) != 0) return -1;
             if (cg_gi(g, 1, "(void)sender;\n") != 0) return -1;
@@ -110,6 +191,7 @@ ui_cbs(Gen *g)
             if (cg_gi(g, 1, "if (!ui || !sender) return;\n") != 0) return -1;
             if (cg_gi(g, 1, "%s = uiCheckboxChecked(sender);\n", s.lv) != 0) return -1;
             if (call_named(g, w, "toggle", 1) != 0) return -1;
+            if (call_named(g, w, "click", 1) != 0) return -1;
             if (cg_gp(g, "}\n") != 0) return -1;
         } else if (w->kind == TR_KIND_INPUT) {
             char bbuf[64], lbuf[64];
@@ -138,14 +220,25 @@ ui_cbs(Gen *g)
             const char *ev = "change";
             if (w->kind == TR_KIND_COMBO) { sig = "uiCombobox"; getter = "uiComboboxSelected"; key = "selected"; }
             if (w->kind == TR_KIND_RADIO) { sig = "uiRadioButtons"; getter = "uiRadioButtonsSelected"; key = "selected"; }
-            if (w->kind == TR_KIND_COLOR) { sig = "uiSpinbox"; getter = "uiSpinboxValue"; key = "r"; ev = NULL; }
+            if (w->kind == TR_KIND_COLOR) { sig = "uiSpinbox"; getter = "uiSpinboxValue"; key = "r"; ev = "change"; }
             if (cg_int_slot(g, w, key, &s) != 0) return -1;
             if (cg_gp(g, "static void tr_uicb_%d(%s *sender, void *data)\n{\n", w->id, sig) != 0) return -1;
             if (cg_gi(g, 1, "%s *ui = (%s *)data;\n", cls, cls) != 0) return -1;
             if (cg_gi(g, 1, "if (!ui || !sender) return;\n") != 0) return -1;
             if (cg_gi(g, 1, "%s = %s(sender);\n", s.lv, getter) != 0) return -1;
             if (ev && call_named(g, w, ev, 1) != 0) return -1;
+            if (w->kind == TR_KIND_RADIO && call_named(g, w, "click", 1) != 0) return -1;
             if (cg_gp(g, "}\n") != 0) return -1;
+            if (w->kind == TR_KIND_SLIDER &&
+                cg_event_armed(g->doc, w, cg_event(w, "up"))) {
+                if (cg_gp(g, "static void tr_uirel_%d(uiSlider *sender, void *data)\n{\n", w->id) != 0)
+                    return -1;
+                if (cg_gi(g, 1, "%s *ui = (%s *)data;\n", cls, cls) != 0) return -1;
+                if (cg_gi(g, 1, "(void)sender;\n") != 0) return -1;
+                if (cg_gi(g, 1, "if (!ui) return;\n") != 0) return -1;
+                if (call_named(g, w, "up", 1) != 0) return -1;
+                if (cg_gp(g, "}\n") != 0) return -1;
+            }
         }
     }
     if (cg_gp(g, "static int tr_ui_close(uiWindow *sender, void *data)\n{\n") != 0) return -1;
@@ -154,7 +247,27 @@ ui_cbs(Gen *g)
     if (cg_gi(g, 1, "if (ui) ui->tr_open = 0;\n") != 0) return -1;
     if (call_named(g, &g->doc->widgets[0], "close", 1) != 0) return -1;
     if (cg_gi(g, 1, "uiQuit();\n") != 0) return -1;
-    return cg_gi(g, 1, "return 1;\n}\n\n");
+    if (cg_gi(g, 1, "return 1;\n}\n\n") != 0) return -1;
+    if (cg_event_armed(g->doc, &g->doc->widgets[0], cg_event(&g->doc->widgets[0], "resize"))) {
+        if (cg_gp(g, "static void tr_ui_resize(uiWindow *sender, void *data)\n{\n") != 0) return -1;
+        if (cg_gi(g, 1, "%s *ui = (%s *)data;\n", cls, cls) != 0) return -1;
+        if (cg_gi(g, 1, "(void)sender;\n") != 0) return -1;
+        if (cg_gi(g, 1, "if (!ui) return;\n") != 0) return -1;
+        if (call_named(g, &g->doc->widgets[0], "resize", 1) != 0) return -1;
+        if (cg_gp(g, "}\n\n") != 0) return -1;
+    }
+    if (cg_event_armed(g->doc, &g->doc->widgets[0], cg_event(&g->doc->widgets[0], "focus")) ||
+        cg_event_armed(g->doc, &g->doc->widgets[0], cg_event(&g->doc->widgets[0], "blur"))) {
+        if (cg_gp(g, "static void tr_ui_focus(uiWindow *sender, void *data)\n{\n") != 0) return -1;
+        if (cg_gi(g, 1, "%s *ui = (%s *)data;\n", cls, cls) != 0) return -1;
+        if (cg_gi(g, 1, "if (!ui || !sender) return;\n") != 0) return -1;
+        if (cg_gi(g, 1, "if (uiWindowFocused(sender)) {\n") != 0) return -1;
+        if (call_named(g, &g->doc->widgets[0], "focus", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else {\n") != 0) return -1;
+        if (call_named(g, &g->doc->widgets[0], "blur", 2) != 0) return -1;
+        if (cg_gp(g, "}\n}\n\n") != 0) return -1;
+    }
+    return 0;
 }
 
 static int
@@ -228,6 +341,9 @@ ui_widget(Gen *g, const TrWidget *w, const char *box, int d)
         if (cg_gi(g, d + 1, "if (!%s) return -1;\n", var) != 0) return -1;
         if (cg_gi(g, d + 1, "uiSliderSetValue(%s, tr_bound_int(%s, 0, 100));\n", var, s.lv) != 0) return -1;
         if (cg_gi(g, d + 1, "uiSliderOnChanged(%s, tr_uicb_%d, ui);\n", var, w->id) != 0) return -1;
+        if (cg_event_armed(g->doc, w, cg_event(w, "up")) &&
+            cg_gi(g, d + 1, "uiSliderOnReleased(%s, tr_uirel_%d, ui);\n", var, w->id) != 0)
+            return -1;
         if (ui_box_append(g, box, var, 1, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     case TR_KIND_COMBO:
@@ -342,43 +458,35 @@ ui_widget(Gen *g, const TrWidget *w, const char *box, int d)
         int c;
         int head = tr_prop_int(w, "header", 1) ? 1 : 0;
         if (column_names(w, parts, 8, &nc) != 0) return -1;
+        if (nc < 1) {
+            memcpy(parts[0], "Value", 6);
+            nc = 1;
+        }
         if (cg_gi(g, d, "{\n") != 0) return -1;
-        if (cg_gi(g, d + 1, "int tr_rows = ") != 0) return -1;
-        {
-            const TrProp *p = tr_prop(w, "rows");
-            char rew[512];
-            if (p && p->bind[0] && !p->twoway) {
-                if (tr_rewrite_expr(g->doc, p->bind, rew, sizeof rew) != 0) return -1;
-                if (cg_gp(g, "(%s);\n", rew) != 0) return -1;
-            } else if (cg_gp(g, "%d;\n", tr_prop_int(w, "rows", 3)) != 0) return -1;
+        if (cg_gi(g, d + 1, "uiTableModel *tr_tm;\n") != 0) return -1;
+        if (cg_gi(g, d + 1, "uiTableParams tr_tp;\n") != 0) return -1;
+        if (cg_gi(g, d + 1, "uiTable *%s;\n", var) != 0) return -1;
+        if (cg_gi(g, d + 1, "tr_tui_%d = ui;\n", w->id) != 0) return -1;
+        if (cg_gi(g, d + 1, "tr_tm = uiNewTableModel(&tr_th_%d);\n", w->id) != 0) return -1;
+        if (cg_gi(g, d + 1, "memset(&tr_tp, 0, sizeof tr_tp);\n") != 0) return -1;
+        if (cg_gi(g, d + 1, "tr_tp.Model = tr_tm;\n") != 0) return -1;
+        if (cg_gi(g, d + 1, "tr_tp.RowBackgroundColorModelColumn = -1;\n") != 0) return -1;
+        if (cg_gi(g, d + 1, "%s = uiNewTable(&tr_tp);\n", var) != 0) return -1;
+        if (cg_gi(g, d + 1, "if (!tr_tm || !%s) return -1;\n", var) != 0) return -1;
+        for (c = 0; c < nc; c++) {
+            if (cg_gi(g, d + 1, "uiTableAppendTextColumn(%s, ", var) != 0) return -1;
+            if (cg_cstr(g, parts[c]) != 0) return -1;
+            if (cg_gp(g, ", %d, uiTableModelColumnNeverEditable, NULL);\n", c) != 0) return -1;
         }
-        if (cg_gi(g, d + 1, "int tr_cols = %d;\n", nc) != 0) return -1;
-        if (cg_gi(g, d + 1, "int row, col;\n") != 0) return -1;
-        if (cg_gi(g, d + 1, "if (tr_rows < 0) tr_rows = 0;\n") != 0) return -1;
-        if (cg_gi(g, d + 1, "if (tr_rows > 64) tr_rows = 64;\n") != 0) return -1;
-        if (head) {
-            if (cg_gi(g, d + 1, "{\n") != 0) return -1;
-            if (cg_gi(g, d + 2, "uiBox *tr_hdr = uiNewHorizontalBox();\n") != 0) return -1;
-            if (cg_gi(g, d + 2, "if (!tr_hdr) return -1;\n") != 0) return -1;
-            for (c = 0; c < nc; c++) {
-                if (cg_gi(g, d + 2, "uiBoxAppend(tr_hdr, uiControl(uiNewLabel(") != 0) return -1;
-                if (cg_cstr(g, parts[c]) != 0) return -1;
-                if (cg_gp(g, ")), 1);\n") != 0) return -1;
-            }
-            if (cg_gi(g, d + 2, "uiBoxAppend(%s, uiControl(tr_hdr), 0);\n", box) != 0) return -1;
-            if (cg_gi(g, d + 1, "}\n") != 0) return -1;
-        }
-        if (cg_gi(g, d + 1, "for (row = 0; row < tr_rows; row++) {\n") != 0) return -1;
-        if (cg_gi(g, d + 2, "uiBox *tr_line = uiNewHorizontalBox();\n") != 0) return -1;
-        if (cg_gi(g, d + 2, "if (!tr_line) return -1;\n") != 0) return -1;
-        if (cg_gi(g, d + 2, "for (col = 0; col < tr_cols; col++) {\n") != 0) return -1;
-        if (cg_gi(g, d + 3, "char tr_cell[160];\n") != 0) return -1;
-        if (cg_gi(g, d + 3, "%s_cell(ui, row, col, tr_cell, sizeof tr_cell);\n", g->doc->class_name) != 0)
+        if (cg_gi(g, d + 1, "uiTableHeaderSetVisible(%s, %d);\n", var, head) != 0) return -1;
+        if ((cg_event_armed(g->doc, w, cg_event(w, "click")) ||
+                cg_event_armed(g->doc, w, cg_event(w, "select"))) &&
+            cg_gi(g, d + 1, "uiTableOnRowClicked(%s, tr_tclick_%d, ui);\n", var, w->id) != 0)
             return -1;
-        if (cg_gi(g, d + 3, "uiBoxAppend(tr_line, uiControl(uiNewLabel(tr_cell)), 1);\n") != 0) return -1;
-        if (cg_gi(g, d + 2, "}\n") != 0) return -1;
-        if (cg_gi(g, d + 2, "uiBoxAppend(%s, uiControl(tr_line), 0);\n", box) != 0) return -1;
-        if (cg_gi(g, d + 1, "}\n") != 0) return -1;
+        if (cg_event_armed(g->doc, w, cg_event(w, "dblclick")) &&
+            cg_gi(g, d + 1, "uiTableOnRowDoubleClicked(%s, tr_tdbl_%d, ui);\n", var, w->id) != 0)
+            return -1;
+        if (ui_box_append(g, box, var, 1, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
     case TR_KIND_SPLITTER: {
@@ -545,6 +653,16 @@ cg_libui(Gen *g)
     if (cg_gi(g, 1, "if (!tr_win || !tr_root) return -1;\n") != 0) return -1;
     if (cg_gi(g, 1, "uiWindowSetMargined(tr_win, 1);\n") != 0) return -1;
     if (cg_gi(g, 1, "uiWindowOnClosing(tr_win, tr_ui_close, ui);\n") != 0) return -1;
+    if (cg_event_armed(g->doc, root, cg_event(root, "resize")) &&
+        cg_gi(g, 1, "uiWindowOnContentSizeChanged(tr_win, tr_ui_resize, ui);\n") != 0)
+        return -1;
+    if ((cg_event_armed(g->doc, root, cg_event(root, "focus")) ||
+            cg_event_armed(g->doc, root, cg_event(root, "blur"))) &&
+        cg_gi(g, 1, "uiWindowOnFocusChanged(tr_win, tr_ui_focus, ui);\n") != 0)
+        return -1;
+    if (cg_gi(g, 1, "uiWindowSetResizeable(tr_win, %d);\n",
+            tr_prop_int(root, "resizable", 1) ? 1 : 0) != 0)
+        return -1;
     if (root->kind == TR_KIND_ACTIVITY) {
         if (cg_gi(g, 1, "uiWindowSetBorderless(tr_win, 1);\n") != 0) return -1;
         if (cg_gi(g, 1, "uiWindowSetFullscreen(tr_win, 1);\n") != 0) return -1;
@@ -554,8 +672,84 @@ cg_libui(Gen *g)
     if (snprintf(box, sizeof box, "tr_root") < 0) return -1;
     if (ui_children(g, root->id, box, 1) != 0) return -1;
     if (cg_gi(g, 1, "uiControlShow(uiControl(tr_win));\n") != 0) return -1;
+    if (call_named(g, root, "appear", 1) != 0) return -1;
     if (cg_gi(g, 1, "%s_user_post(ui);\n", cls) != 0) return -1;
     if (cg_gi(g, 1, "return 0;\n}\n") != 0) return -1;
+    return 0;
+}
+
+static int
+lv_armed(const Gen *g, const TrWidget *w, const char *ev)
+{
+    return cg_event_armed(g->doc, w, cg_event(w, ev));
+}
+
+static int
+lv_value_kind(TrKind kind)
+{
+    return kind == TR_KIND_CHECKBOX || kind == TR_KIND_SLIDER || kind == TR_KIND_COMBO ||
+        kind == TR_KIND_RADIO || kind == TR_KIND_TABS || kind == TR_KIND_INPUT ||
+        kind == TR_KIND_COLLAPSE || kind == TR_KIND_TREE;
+}
+
+static int
+lv_needs_cb(const Gen *g, const TrWidget *w)
+{
+    static const char *const names[] = {
+        "click", "dblclick", "down", "up", "move", "enter", "leave",
+        "focus", "blur", "keydown", "change", "toggle", "select",
+        "resize", "paint", NULL
+    };
+    int i;
+    if (!w) return 0;
+    if (lv_value_kind(w->kind)) return 1;
+    for (i = 0; names[i]; i++) {
+        if (lv_armed(g, w, names[i])) return 1;
+    }
+    return 0;
+}
+
+static int
+lv_bind(Gen *g, const char *var, int id, const char *code, int d)
+{
+    return cg_gi(g, d, "lv_obj_add_event_cb(%s, tr_lvcb_%d, %s, ui);\n", var, id, code);
+}
+
+static int
+lv_hook(Gen *g, const TrWidget *w, const char *var, int d)
+{
+    int saw_value = 0;
+    int saw_click = 0;
+    if (!g || !w || !var) return -1;
+    if (!lv_needs_cb(g, w)) return 0;
+    if (lv_value_kind(w->kind) && w->kind != TR_KIND_COLLAPSE && w->kind != TR_KIND_TREE) {
+        if (lv_bind(g, var, w->id, "LV_EVENT_VALUE_CHANGED", d) != 0) return -1;
+        saw_value = 1;
+    }
+    if (lv_armed(g, w, "click") || w->kind == TR_KIND_COLLAPSE || w->kind == TR_KIND_TREE ||
+        w->kind == TR_KIND_BUTTON || w->kind == TR_KIND_MENUITEM ||
+        (w->kind == TR_KIND_TABLE && (lv_armed(g, w, "select") || lv_armed(g, w, "click")))) {
+        if (lv_bind(g, var, w->id, "LV_EVENT_CLICKED", d) != 0) return -1;
+        saw_click = 1;
+    }
+    if (!saw_click && lv_armed(g, w, "click") &&
+        lv_bind(g, var, w->id, "LV_EVENT_CLICKED", d) != 0)
+        return -1;
+    if (lv_armed(g, w, "dblclick") && lv_bind(g, var, w->id, "LV_EVENT_DOUBLE_CLICKED", d) != 0)
+        return -1;
+    if (lv_armed(g, w, "down") && lv_bind(g, var, w->id, "LV_EVENT_PRESSED", d) != 0) return -1;
+    if (lv_armed(g, w, "up") && lv_bind(g, var, w->id, "LV_EVENT_RELEASED", d) != 0) return -1;
+    if (lv_armed(g, w, "move") && lv_bind(g, var, w->id, "LV_EVENT_PRESSING", d) != 0) return -1;
+    if (lv_armed(g, w, "enter") && lv_bind(g, var, w->id, "LV_EVENT_HOVER_OVER", d) != 0) return -1;
+    if (lv_armed(g, w, "leave") && lv_bind(g, var, w->id, "LV_EVENT_HOVER_LEAVE", d) != 0) return -1;
+    if (lv_armed(g, w, "focus") && lv_bind(g, var, w->id, "LV_EVENT_FOCUSED", d) != 0) return -1;
+    if (lv_armed(g, w, "blur") && lv_bind(g, var, w->id, "LV_EVENT_DEFOCUSED", d) != 0) return -1;
+    if (lv_armed(g, w, "keydown") && lv_bind(g, var, w->id, "LV_EVENT_KEY", d) != 0) return -1;
+    if (lv_armed(g, w, "resize") && lv_bind(g, var, w->id, "LV_EVENT_SIZE_CHANGED", d) != 0) return -1;
+    if (lv_armed(g, w, "paint") && lv_bind(g, var, w->id, "LV_EVENT_DRAW_POST", d) != 0) return -1;
+    if (!saw_value && (lv_armed(g, w, "change") || lv_armed(g, w, "toggle") || lv_armed(g, w, "select")) &&
+        lv_bind(g, var, w->id, "LV_EVENT_VALUE_CHANGED", d) != 0)
+        return -1;
     return 0;
 }
 
@@ -566,44 +760,75 @@ lv_cbs(Gen *g)
     int i;
     for (i = 0; i < g->doc->nwidgets; i++) {
         const TrWidget *w = &g->doc->widgets[i];
-        const char *ev = NULL;
-        if (w->kind == TR_KIND_BUTTON || w->kind == TR_KIND_MENUITEM) ev = "click";
-        else if (w->kind == TR_KIND_CHECKBOX || w->kind == TR_KIND_COLLAPSE || w->kind == TR_KIND_TREE)
-            ev = "toggle";
-        else if (w->kind == TR_KIND_INPUT || w->kind == TR_KIND_SLIDER || w->kind == TR_KIND_COMBO ||
-                 w->kind == TR_KIND_RADIO || w->kind == TR_KIND_TABS)
-            ev = "change";
-        else continue;
+        if (!lv_needs_cb(g, w)) continue;
         if (cg_gp(g, "static void tr_lvcb_%d(lv_event_t *e)\n{\n", w->id) != 0) return -1;
         if (cg_gi(g, 1, "%s *ui = (%s *)lv_event_get_user_data(e);\n", cls, cls) != 0) return -1;
         if (cg_gi(g, 1, "lv_obj_t *tr_tgt;\n") != 0) return -1;
-        if (cg_gi(g, 1, "if (!ui) return;\n") != 0) return -1;
+        if (cg_gi(g, 1, "lv_event_code_t tr_code;\n") != 0) return -1;
+        if (cg_gi(g, 1, "if (!ui || !e) return;\n") != 0) return -1;
         if (cg_gi(g, 1, "tr_tgt = lv_event_get_target(e);\n") != 0) return -1;
+        if (cg_gi(g, 1, "tr_code = lv_event_get_code(e);\n") != 0) return -1;
+        if (cg_gi(g, 1, "if (tr_code == LV_EVENT_VALUE_CHANGED) {\n") != 0) return -1;
         if (w->kind == TR_KIND_CHECKBOX) {
             CgSlot s;
             if (cg_int_slot(g, w, "checked", &s) != 0) return -1;
-            if (cg_gi(g, 1, "%s = lv_obj_has_state(tr_tgt, LV_STATE_CHECKED) ? 1 : 0;\n", s.lv) != 0)
+            if (cg_gi(g, 2, "%s = lv_obj_has_state(tr_tgt, LV_STATE_CHECKED) ? 1 : 0;\n", s.lv) != 0)
                 return -1;
+            if (call_named(g, w, "toggle", 2) != 0) return -1;
         } else if (w->kind == TR_KIND_SLIDER) {
             CgSlot s;
             if (cg_int_slot(g, w, "value", &s) != 0) return -1;
-            if (cg_gi(g, 1, "%s = lv_slider_get_value(tr_tgt);\n", s.lv) != 0) return -1;
+            if (cg_gi(g, 2, "%s = lv_slider_get_value(tr_tgt);\n", s.lv) != 0) return -1;
+            if (call_named(g, w, "change", 2) != 0) return -1;
         } else if (w->kind == TR_KIND_COMBO || w->kind == TR_KIND_RADIO) {
             CgSlot s;
             if (cg_int_slot(g, w, "selected", &s) != 0) return -1;
-            if (cg_gi(g, 1, "%s = (int)lv_dropdown_get_selected(tr_tgt);\n", s.lv) != 0) return -1;
+            if (cg_gi(g, 2, "%s = (int)lv_dropdown_get_selected(tr_tgt);\n", s.lv) != 0) return -1;
+            if (call_named(g, w, "change", 2) != 0) return -1;
         } else if (w->kind == TR_KIND_TABS) {
             CgSlot s;
             if (cg_int_slot(g, w, "selected", &s) != 0) return -1;
-            if (cg_gi(g, 1, "%s = (int)lv_tabview_get_tab_active(tr_tgt);\n", s.lv) != 0) return -1;
+            if (cg_gi(g, 2, "%s = (int)lv_tabview_get_tab_active(tr_tgt);\n", s.lv) != 0) return -1;
+            if (call_named(g, w, "change", 2) != 0) return -1;
         } else if (w->kind == TR_KIND_INPUT) {
             char bbuf[64], lbuf[64];
             if (text_buf(g->doc, w, bbuf, sizeof bbuf, lbuf, sizeof lbuf) != 0) return -1;
-            if (cg_gi(g, 1, "tr_copy(%s, sizeof %s, lv_textarea_get_text(tr_tgt));\n", bbuf, bbuf) != 0)
+            if (cg_gi(g, 2, "tr_copy(%s, sizeof %s, lv_textarea_get_text(tr_tgt));\n", bbuf, bbuf) != 0)
                 return -1;
-            if (cg_gi(g, 1, "%s = tr_cstr_len(%s, (int)sizeof %s);\n", lbuf, bbuf, bbuf) != 0) return -1;
-        } else if (cg_gi(g, 1, "(void)tr_tgt;\n") != 0) return -1;
-        if (call_named(g, w, ev, 1) != 0) return -1;
+            if (cg_gi(g, 2, "%s = tr_cstr_len(%s, (int)sizeof %s);\n", lbuf, bbuf, bbuf) != 0) return -1;
+            if (call_named(g, w, "change", 2) != 0) return -1;
+        } else if (w->kind == TR_KIND_TABLE) {
+            if (call_named(g, w, "select", 2) != 0) return -1;
+        } else if (cg_gi(g, 2, "(void)tr_tgt;\n") != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_CLICKED) {\n") != 0) return -1;
+        if ((w->kind == TR_KIND_COLLAPSE || w->kind == TR_KIND_TREE) &&
+            call_named(g, w, "toggle", 2) != 0)
+            return -1;
+        if (w->kind == TR_KIND_TABLE && call_named(g, w, "select", 2) != 0) return -1;
+        if (call_named(g, w, "click", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_DOUBLE_CLICKED) {\n") != 0) return -1;
+        if (call_named(g, w, "dblclick", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_PRESSED) {\n") != 0) return -1;
+        if (call_named(g, w, "down", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_RELEASED) {\n") != 0) return -1;
+        if (call_named(g, w, "up", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_PRESSING) {\n") != 0) return -1;
+        if (call_named(g, w, "move", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_HOVER_OVER) {\n") != 0) return -1;
+        if (call_named(g, w, "enter", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_HOVER_LEAVE) {\n") != 0) return -1;
+        if (call_named(g, w, "leave", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_FOCUSED) {\n") != 0) return -1;
+        if (call_named(g, w, "focus", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_DEFOCUSED) {\n") != 0) return -1;
+        if (call_named(g, w, "blur", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_KEY) {\n") != 0) return -1;
+        if (call_named(g, w, "keydown", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_SIZE_CHANGED) {\n") != 0) return -1;
+        if (call_named(g, w, "resize", 2) != 0) return -1;
+        if (cg_gi(g, 1, "} else if (tr_code == LV_EVENT_DRAW_POST) {\n") != 0) return -1;
+        if (call_named(g, w, "paint", 2) != 0) return -1;
+        if (cg_gi(g, 1, "}\n") != 0) return -1;
         if (cg_gp(g, "}\n") != 0) return -1;
     }
     return 0;
@@ -647,6 +872,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (cg_text(g, w, "text") != 0) return -1;
         if (cg_gp(g, ");\n") != 0) return -1;
         if (st && cg_gi(g, d + 1, "lv_obj_set_flex_grow(%s, 1);\n", var) != 0) return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     case TR_KIND_BUTTON:
         if (cg_gi(g, d, "{\n") != 0) return -1;
@@ -656,8 +882,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (cg_gi(g, d + 1, "lv_label_set_text(tr_lb, ") != 0) return -1;
         if (cg_text(g, w, "label") != 0) return -1;
         if (cg_gp(g, ");\n") != 0) return -1;
-        if (cg_gi(g, d + 1, "lv_obj_add_event_cb(%s, tr_lvcb_%d, LV_EVENT_CLICKED, ui);\n", var, w->id) != 0)
-            return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     case TR_KIND_CHECKBOX: {
         CgSlot s;
@@ -668,8 +893,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (cg_text(g, w, "label") != 0) return -1;
         if (cg_gp(g, ");\n") != 0) return -1;
         if (cg_gi(g, d + 1, "if (%s) lv_obj_add_state(%s, LV_STATE_CHECKED);\n", s.lv, var) != 0) return -1;
-        if (cg_gi(g, d + 1, "lv_obj_add_event_cb(%s, tr_lvcb_%d, LV_EVENT_VALUE_CHANGED, ui);\n", var, w->id) != 0)
-            return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
     case TR_KIND_INPUT: {
@@ -684,8 +908,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
             if (cg_gi(g, d + 1, "lv_textarea_set_password_mode(%s, true);\n", var) != 0) return -1;
         }
         if (cg_gi(g, d + 1, "lv_textarea_set_text(%s, %s);\n", var, bbuf) != 0) return -1;
-        if (cg_gi(g, d + 1, "lv_obj_add_event_cb(%s, tr_lvcb_%d, LV_EVENT_VALUE_CHANGED, ui);\n", var, w->id) != 0)
-            return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         if (st && cg_gi(g, d + 1, "lv_obj_set_flex_grow(%s, 1);\n", var) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
@@ -698,8 +921,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (cg_gi(g, d + 1, "lv_slider_set_value(%s, tr_bound_int(%s, 0, 100), LV_ANIM_OFF);\n", var, s.lv) != 0)
             return -1;
         if (cg_gi(g, d + 1, "lv_obj_set_width(%s, lv_pct(100));\n", var) != 0) return -1;
-        if (cg_gi(g, d + 1, "lv_obj_add_event_cb(%s, tr_lvcb_%d, LV_EVENT_VALUE_CHANGED, ui);\n", var, w->id) != 0)
-            return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
     case TR_KIND_COMBO:
@@ -716,8 +938,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (lv_emit_options(g, parts, n) != 0) return -1;
         if (cg_gp(g, ");\n") != 0) return -1;
         if (cg_gi(g, d + 1, "lv_dropdown_set_selected(%s, (uint32_t)%s);\n", var, s.lv) != 0) return -1;
-        if (cg_gi(g, d + 1, "lv_obj_add_event_cb(%s, tr_lvcb_%d, LV_EVENT_VALUE_CHANGED, ui);\n", var, w->id) != 0)
-            return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
     case TR_KIND_PROGRESS: {
@@ -729,6 +950,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (cg_gi(g, d + 1, "lv_bar_set_value(%s, tr_bound_int(%s, 0, 100), LV_ANIM_OFF);\n", var, s.lv) != 0)
             return -1;
         if (cg_gi(g, d + 1, "lv_obj_set_width(%s, lv_pct(100));\n", var) != 0) return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
     case TR_KIND_COLOR:
@@ -743,12 +965,14 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (cg_gi(g, d, "{ lv_obj_t *%s = lv_obj_create(%s);\n", var, parent) != 0) return -1;
         if (cg_gi(g, d + 1, "if (!%s) return -1;\n", var) != 0) return -1;
         if (cg_gi(g, d + 1, "lv_obj_set_size(%s, lv_pct(100), 8);\n", var) != 0) return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     case TR_KIND_SPACER:
         if (cg_gi(g, d, "{ lv_obj_t *%s = lv_obj_create(%s);\n", var, parent) != 0) return -1;
         if (cg_gi(g, d + 1, "if (!%s) return -1;\n", var) != 0) return -1;
         if (cg_gi(g, d + 1, "lv_obj_set_flex_grow(%s, 1);\n", var) != 0) return -1;
         if (cg_gi(g, d + 1, "lv_obj_set_height(%s, 8);\n", var) != 0) return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     case TR_KIND_IMAGE:
         if (cg_gi(g, d, "{ lv_obj_t *%s = lv_image_create(%s);\n", var, parent) != 0) return -1;
@@ -756,6 +980,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (cg_gi(g, d + 1, "lv_image_set_src(%s, ", var) != 0) return -1;
         if (cg_text(g, w, "path") != 0) return -1;
         if (cg_gp(g, ");\n") != 0) return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     case TR_KIND_CUSTOM: {
         char hn[TR_NAME_MAX];
@@ -781,12 +1006,9 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
             if (cg_gp(g, ");\n") != 0) return -1;
             if (cg_gi(g, d + 1, "}\n") != 0) return -1;
         }
-        if (w->kind == TR_KIND_COLLAPSE || w->kind == TR_KIND_TREE) {
-            if (cg_gi(g, d + 1, "lv_obj_add_event_cb(%s, tr_lvcb_%d, LV_EVENT_CLICKED, ui);\n", var, w->id) != 0)
-                return -1;
-        }
         if (st && cg_gi(g, d + 1, "lv_obj_set_flex_grow(%s, 1);\n", var) != 0) return -1;
         if (lv_children(g, w->id, var, d + 1) != 0) return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     case TR_KIND_TABS: {
         int kids[TR_WIDGETS_MAX];
@@ -796,8 +1018,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
         if (cg_gi(g, d, "{ lv_obj_t *%s = lv_tabview_create(%s);\n", var, parent) != 0) return -1;
         if (cg_gi(g, d + 1, "if (!%s) return -1;\n", var) != 0) return -1;
         if (cg_gi(g, d + 1, "lv_obj_set_size(%s, lv_pct(100), lv_pct(100));\n", var) != 0) return -1;
-        if (cg_gi(g, d + 1, "lv_obj_add_event_cb(%s, tr_lvcb_%d, LV_EVENT_VALUE_CHANGED, ui);\n", var, w->id) != 0)
-            return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         for (i = 0; i < n; i++) {
             const TrWidget *tab = &g->doc->widgets[kids[i]];
             if (cg_gi(g, d + 1, "{\n") != 0) return -1;
@@ -843,6 +1064,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
             return -1;
         if (cg_gi(g, d + 2, "}\n") != 0) return -1;
         if (cg_gi(g, d + 1, "}\n") != 0) return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
     case TR_KIND_POPUP:
@@ -853,6 +1075,7 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
             return -1;
         if (cg_gi(g, d + 1, "lv_obj_set_flex_flow(%s, LV_FLEX_FLOW_COLUMN);\n", var) != 0) return -1;
         if (lv_children(g, w->id, var, d + 1) != 0) return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     case TR_KIND_TAB:
         return lv_children(g, w->id, parent, d);
@@ -889,18 +1112,19 @@ lv_widget(Gen *g, const TrWidget *w, const char *parent, int d)
                 if (cg_gi(g, d + 3, "lv_label_set_text(tr_bl, ") != 0) return -1;
                 if (cg_text(g, it, "label") != 0) return -1;
                 if (cg_gp(g, ");\n") != 0) return -1;
-                if (cg_gi(g, d + 3, "lv_obj_add_event_cb(tr_btn, tr_lvcb_%d, LV_EVENT_CLICKED, ui);\n", it->id) != 0)
-                    return -1;
+                if (lv_hook(g, it, "tr_btn", d + 3) != 0) return -1;
                 if (cg_gi(g, d + 2, "}\n") != 0) return -1;
             }
             if (cg_gi(g, d + 1, "}\n") != 0) return -1;
         }
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
     default:
         if (cg_gi(g, d, "{ lv_obj_t *%s = lv_label_create(%s);\n", var, parent) != 0) return -1;
         if (cg_gi(g, d + 1, "if (%s) lv_label_set_text(%s, \"%s\");\n", var, var, tr_kind_name(w->kind)) != 0)
             return -1;
+        if (lv_hook(g, w, var, d + 1) != 0) return -1;
         return cg_gi(g, d, "}\n");
     }
 }
@@ -970,6 +1194,8 @@ cg_lvgl(Gen *g)
     if (root->kind == TR_KIND_ACTIVITY || root->kind == TR_KIND_MAIN || root->kind == TR_KIND_WINDOW) {
         if (lv_children(g, root->id, "tr_parent", 1) != 0) return -1;
     } else if (lv_widget(g, root, "tr_parent", 1) != 0) return -1;
+    if (lv_hook(g, root, "tr_parent", 1) != 0) return -1;
+    if (call_named(g, root, "appear", 1) != 0) return -1;
     if (cg_gi(g, 1, "%s_user_post(ui);\n", cls) != 0) return -1;
     if (cg_gi(g, 1, "(void)%d;\n", root->w) != 0) return -1;
     return cg_gi(g, 1, "return 0;\n}\n");

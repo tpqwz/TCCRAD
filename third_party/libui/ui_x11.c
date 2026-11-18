@@ -31,7 +31,8 @@ enum {
     UI_GROUP,
     UI_TAB,
     UI_MENU,
-    UI_ITEM
+    UI_ITEM,
+    UI_TABLE
 };
 
 struct uiControl {
@@ -56,11 +57,36 @@ struct uiControl {
     void *close_data;
     void (*on_click)(void *, void *);
     void *click_data;
+    void (*on_release)(void *, void *);
+    void *release_data;
+    void (*on_resize)(void *, void *);
+    void *resize_data;
+    void (*on_focus)(void *, void *);
+    void *focus_data;
     void (*on_menu)(void *, void *, void *);
     void *menu_data;
+    int focused;
+    int resizeable;
+    int seen_size;
+    int header_on;
+    int last_row;
+    unsigned long last_click;
+    uiTableModel *model;
+    void (*on_row)(void *, int, void *);
+    void *row_data;
+    void (*on_dbl)(void *, int, void *);
+    void *dbl_data;
     struct uiControl *child;
     struct uiControl *kids[UI_KIDS];
     int nkids;
+};
+
+struct uiTableValue {
+    char text[UI_TEXT];
+};
+
+struct uiTableModel {
+    uiTableModelHandler *mh;
 };
 
 static Display *g_dpy;
@@ -130,6 +156,7 @@ pref_h(const struct uiControl *c)
     case UI_SEP: return 10;
     case UI_PROGRESS: return 18;
     case UI_RADIO: return (c->nitems > 0 ? c->nitems : 1) * 22;
+    case UI_TABLE: return 22 * 6;
     case UI_GROUP:
         return 26 + pref_h(c->child);
     case UI_TAB:
@@ -389,6 +416,47 @@ draw_tree(struct uiControl *c, Window win)
     case UI_WIN:
         draw_tree(c->child, win);
         break;
+    case UI_TABLE: {
+        int cols = c->nitems > 0 ? c->nitems : 1;
+        int rows = 0;
+        int head = c->header_on ? 22 : 0;
+        int cw;
+        int r;
+        int col;
+        if (c->model && c->model->mh && c->model->mh->NumRows)
+            rows = c->model->mh->NumRows(c->model->mh, c->model);
+        if (rows < 0) rows = 0;
+        if (head + rows * 22 > c->h) {
+            int fit = (c->h - head) / 22;
+            if (fit < 0) fit = 0;
+            if (rows > fit) rows = fit;
+        }
+        cw = c->w / cols;
+        if (cw < 1) cw = 1;
+        set_color(rgb(40, 40, 40));
+        fill(win, c->x, c->y, c->w, c->h);
+        set_color(rgb(160, 160, 160));
+        frame(win, c->x, c->y, c->w, c->h);
+        if (c->header_on) {
+            set_color(rgb(70, 90, 120));
+            fill(win, c->x + 1, c->y + 1, c->w - 2, 20);
+            set_color(rgb(240, 240, 240));
+            for (col = 0; col < c->nitems && col < UI_ITEMS; col++)
+                text_in(win, c->x + 4 + col * cw, c->y + 16, c->items[col]);
+        }
+        set_color(rgb(220, 220, 220));
+        for (r = 0; r < rows; r++) {
+            int yy = c->y + head + r * 22;
+            for (col = 0; col < cols && col < UI_ITEMS; col++) {
+                uiTableValue *v = NULL;
+                if (c->model && c->model->mh && c->model->mh->CellValue)
+                    v = c->model->mh->CellValue(c->model->mh, c->model, r, col);
+                text_in(win, c->x + 4 + col * cw, yy + 16, v ? v->text : "");
+                uiFreeTableValue(v);
+            }
+        }
+        break;
+    }
     default:
         break;
     }
@@ -458,7 +526,7 @@ find_at(struct uiControl *c, int x, int y)
 }
 
 static void
-click_ctl(struct uiControl *win, struct uiControl *c, int x, int y)
+click_ctl(struct uiControl *win, struct uiControl *c, int x, int y, unsigned long when)
 {
     if (!c) return;
     if (c->kind == UI_BUTTON && c->on_click) c->on_click(c, c->click_data);
@@ -490,6 +558,20 @@ click_ctl(struct uiControl *win, struct uiControl *c, int x, int y)
         if (c->value < c->vmin) c->value = c->vmin;
         if (c->value > c->vmax) c->value = c->vmax;
         if (c->on_click) c->on_click(c, c->click_data);
+    } else if (c->kind == UI_TABLE) {
+        int head = c->header_on ? 22 : 0;
+        int row = (y - c->y - head) / 22;
+        int nrows = 0;
+        if (c->model && c->model->mh && c->model->mh->NumRows)
+            nrows = c->model->mh->NumRows(c->model->mh, c->model);
+        if (row >= 0 && row < nrows) {
+            if (c->on_row) c->on_row(c, row, c->row_data);
+            if (c->on_dbl && row == c->last_row && when >= c->last_click &&
+                when - c->last_click < 400)
+                c->on_dbl(c, row, c->dbl_data);
+            c->last_row = row;
+            c->last_click = when;
+        }
     } else if (c->kind == UI_TAB && y < c->y + 28) {
         int idx = (x - c->x) / 90;
         if (idx < 0) idx = 0;
@@ -549,12 +631,21 @@ ensure_xwin(struct uiControl *c)
     memset(&at, 0, sizeof at);
     at.background_pixel = rgb(32, 32, 32);
     at.override_redirect = c->borderless ? True : False;
-    at.event_mask = ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask;
+    at.event_mask = ExposureMask | KeyPressMask | ButtonPressMask | ButtonReleaseMask |
+        FocusChangeMask | StructureNotifyMask;
     c->win = XCreateWindow(g_dpy, RootWindow(g_dpy, scr), 40, 40,
         (unsigned)width, (unsigned)height, 0, CopyFromParent, InputOutput, CopyFromParent,
         CWBackPixel | CWOverrideRedirect | CWEventMask, &at);
     if (!c->win) return;
     XStoreName(g_dpy, c->win, c->text[0] ? c->text : "libui");
+    if (!c->resizeable) {
+        XSizeHints hints;
+        memset(&hints, 0, sizeof hints);
+        hints.flags = PMinSize | PMaxSize;
+        hints.min_width = hints.max_width = width;
+        hints.min_height = hints.max_height = height;
+        XSetWMNormalHints(g_dpy, c->win, &hints);
+    }
     if (!g_wm_delete) g_wm_delete = XInternAtom(g_dpy, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(g_dpy, c->win, &g_wm_delete, 1);
     c->w = width;
@@ -628,6 +719,7 @@ uiNewWindow(const char *title, int width, int height, int has_menu)
     c->w = width;
     c->h = height;
     c->has_menu = has_menu ? 1 : 0;
+    c->resizeable = 1;
     g_wins[g_nwins++] = c;
     return (uiWindow *)c;
 }
@@ -646,6 +738,38 @@ uiWindowOnClosing(uiWindow *w, int (*f)(uiWindow *, void *), void *data)
     if (!c) return;
     c->on_close = f;
     c->close_data = data;
+}
+
+void
+uiWindowOnContentSizeChanged(uiWindow *w, void (*f)(uiWindow *, void *), void *data)
+{
+    struct uiControl *c = as_ctl(w);
+    if (!c) return;
+    c->on_resize = (void (*)(void *, void *))f;
+    c->resize_data = data;
+}
+
+void
+uiWindowOnFocusChanged(uiWindow *w, void (*f)(uiWindow *, void *), void *data)
+{
+    struct uiControl *c = as_ctl(w);
+    if (!c) return;
+    c->on_focus = (void (*)(void *, void *))f;
+    c->focus_data = data;
+}
+
+int
+uiWindowFocused(uiWindow *w)
+{
+    struct uiControl *c = as_ctl(w);
+    return c && c->focused ? 1 : 0;
+}
+
+void
+uiWindowSetResizeable(uiWindow *w, int resizeable)
+{
+    struct uiControl *c = as_ctl(w);
+    if (c) c->resizeable = resizeable ? 1 : 0;
 }
 
 void
@@ -890,6 +1014,15 @@ uiSliderOnChanged(uiSlider *s, void (*f)(uiSlider *, void *), void *data)
     c->click_data = data;
 }
 
+void
+uiSliderOnReleased(uiSlider *s, void (*f)(uiSlider *, void *), void *data)
+{
+    struct uiControl *c = as_ctl(s);
+    if (!c) return;
+    c->on_release = (void (*)(void *, void *))f;
+    c->release_data = data;
+}
+
 static int
 append_item(struct uiControl *c, const char *text)
 {
@@ -1085,6 +1218,83 @@ uiMenuAppendItem(uiMenu *m, const char *name)
     return (uiMenuItem *)item;
 }
 
+uiTableValue *
+uiNewTableValueString(const char *str)
+{
+    uiTableValue *v = calloc(1, sizeof *v);
+    if (!v) return NULL;
+    copy_cap(v->text, sizeof v->text, str);
+    return v;
+}
+
+void
+uiFreeTableValue(uiTableValue *v)
+{
+    free(v);
+}
+
+uiTableModel *
+uiNewTableModel(uiTableModelHandler *mh)
+{
+    uiTableModel *m;
+    if (!mh) return NULL;
+    m = calloc(1, sizeof *m);
+    if (!m) return NULL;
+    m->mh = mh;
+    return m;
+}
+
+uiTable *
+uiNewTable(uiTableParams *params)
+{
+    struct uiControl *c;
+    if (!params) return NULL;
+    c = make(UI_TABLE);
+    if (!c) return NULL;
+    c->model = params->Model;
+    c->header_on = 1;
+    c->last_row = -1;
+    return (uiTable *)c;
+}
+
+void
+uiTableAppendTextColumn(uiTable *t, const char *name, int textModelColumn,
+    int textEditableModelColumn, uiTableTextColumnOptionalParams *textParams)
+{
+    struct uiControl *c = as_ctl(t);
+    (void)textModelColumn;
+    (void)textEditableModelColumn;
+    (void)textParams;
+    if (!c || c->nitems >= UI_ITEMS) return;
+    copy_cap(c->items[c->nitems], UI_TEXT, name ? name : "");
+    c->nitems++;
+}
+
+void
+uiTableHeaderSetVisible(uiTable *t, int visible)
+{
+    struct uiControl *c = as_ctl(t);
+    if (c) c->header_on = visible ? 1 : 0;
+}
+
+void
+uiTableOnRowClicked(uiTable *t, void (*f)(uiTable *, int, void *), void *data)
+{
+    struct uiControl *c = as_ctl(t);
+    if (!c) return;
+    c->on_row = (void (*)(void *, int, void *))f;
+    c->row_data = data;
+}
+
+void
+uiTableOnRowDoubleClicked(uiTable *t, void (*f)(uiTable *, int, void *), void *data)
+{
+    struct uiControl *c = as_ctl(t);
+    if (!c) return;
+    c->on_dbl = (void (*)(void *, int, void *))f;
+    c->dbl_data = data;
+}
+
 void
 uiMenuItemOnClicked(uiMenuItem *item, void (*f)(uiMenuItem *, uiWindow *, void *), void *data)
 {
@@ -1122,8 +1332,23 @@ uiMain(void)
         win = win_of(ev.xany.window);
         if (ev.type == Expose && win) redraw(win);
         else if (ev.type == ConfigureNotify && win) {
+            int nw = ev.xconfigure.width;
+            int nh = ev.xconfigure.height;
+            int changed = win->seen_size && (nw != win->w || nh != win->h);
             layout_win(win);
+            win->seen_size = 1;
+            if (changed && win->on_resize) win->on_resize(win, win->resize_data);
             redraw(win);
+        } else if (ev.type == FocusIn && win) {
+            win->focused = 1;
+            if (win->on_focus) win->on_focus(win, win->focus_data);
+        } else if (ev.type == FocusOut && win) {
+            win->focused = 0;
+            if (win->on_focus) win->on_focus(win, win->focus_data);
+        } else if (ev.type == ButtonRelease && win) {
+            struct uiControl *hitc = find_at(win, ev.xbutton.x, ev.xbutton.y);
+            if (hitc && hitc->kind == UI_SLIDER && hitc->on_release)
+                hitc->on_release(hitc, hitc->release_data);
         } else if (ev.type == ButtonPress && win) {
             struct uiControl *hitc;
             int i;
@@ -1140,7 +1365,7 @@ uiMain(void)
                 }
             }
             hitc = find_at(win, x, y);
-            click_ctl(win, hitc, x, y);
+            click_ctl(win, hitc, x, y, ev.xbutton.time);
             redraw(win);
         } else if (ev.type == KeyPress && win) {
             on_key(g_focus, &ev.xkey);

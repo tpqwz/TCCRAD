@@ -107,12 +107,47 @@ static const TrPropDef dock_props[] = {
     {"title", TR_VAL_STRING, 1, 0, "Dock"}
 };
 
-static const char *const ev_appear[] = {"appear", "close", NULL};
-static const char *const ev_click[] = {"click", NULL};
-static const char *const ev_toggle[] = {"toggle", NULL};
-static const char *const ev_change[] = {"change", NULL};
-static const char *const ev_select[] = {"select", NULL};
-static const char *const ev_draw[] = {"draw", NULL};
+static const char *const ev_std[] = {
+    "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", NULL
+};
+static const char *const ev_form[] = {
+    "appear", "close", "resize", "paint",
+    "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", NULL
+};
+static const char *const ev_check[] = {
+    "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", "toggle", "change", NULL
+};
+static const char *const ev_radio[] = {
+    "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", "change", NULL
+};
+static const char *const ev_input[] = {
+    "change", "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", NULL
+};
+static const char *const ev_value[] = {
+    "change", "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", NULL
+};
+static const char *const ev_open[] = {
+    "toggle", "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", NULL
+};
+static const char *const ev_progress[] = {
+    "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", "change", NULL
+};
+static const char *const ev_table[] = {
+    "select", "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", NULL
+};
+static const char *const ev_custom[] = {
+    "draw", "click", "dblclick", "down", "up", "move", "enter", "leave",
+    "focus", "blur", "keydown", "keyup", NULL
+};
 
 static void
 set_err(char *err, size_t cap, int line, const char *msg)
@@ -252,23 +287,30 @@ tr_event_defs(TrKind kind, int *n)
     switch (kind) {
     case TR_KIND_WINDOW: case TR_KIND_POPUP: case TR_KIND_MODAL:
     case TR_KIND_MAIN: case TR_KIND_ACTIVITY:
-        e = ev_appear; break;
+        e = ev_form; break;
     case TR_KIND_BUTTON: case TR_KIND_MENUITEM:
     case TR_KIND_LABEL: case TR_KIND_IMAGE: case TR_KIND_GROUP:
-    case TR_KIND_PROGRESS: case TR_KIND_COLOR: case TR_KIND_TAB:
-    case TR_KIND_MENU: case TR_KIND_MENUBAR: case TR_KIND_SEPARATOR:
-    case TR_KIND_SPACER: case TR_KIND_SPLITTER: case TR_KIND_CHILD:
-    case TR_KIND_DOCK:
-        e = ev_click; break;
-    case TR_KIND_CHECKBOX: case TR_KIND_COLLAPSE: case TR_KIND_TREE:
-        e = ev_toggle; break;
-    case TR_KIND_RADIO: case TR_KIND_INPUT: case TR_KIND_SLIDER:
-    case TR_KIND_COMBO: case TR_KIND_TABS:
-        e = ev_change; break;
+    case TR_KIND_TAB: case TR_KIND_MENU: case TR_KIND_MENUBAR:
+    case TR_KIND_SEPARATOR: case TR_KIND_SPACER: case TR_KIND_SPLITTER:
+    case TR_KIND_CHILD: case TR_KIND_DOCK:
+        e = ev_std; break;
+    case TR_KIND_CHECKBOX:
+        e = ev_check; break;
+    case TR_KIND_RADIO:
+        e = ev_radio; break;
+    case TR_KIND_INPUT:
+        e = ev_input; break;
+    case TR_KIND_SLIDER: case TR_KIND_COMBO: case TR_KIND_TABS:
+    case TR_KIND_COLOR:
+        e = ev_value; break;
+    case TR_KIND_COLLAPSE: case TR_KIND_TREE:
+        e = ev_open; break;
+    case TR_KIND_PROGRESS:
+        e = ev_progress; break;
     case TR_KIND_TABLE:
-        e = ev_select; break;
+        e = ev_table; break;
     case TR_KIND_CUSTOM:
-        e = ev_draw; break;
+        e = ev_custom; break;
     default:
         break;
     }
@@ -402,6 +444,13 @@ tr_span_set(TrDoc *doc, TrSpan *slot, const char *text, size_t n)
         n = 0;
     }
     while (n > 0 && text[n - 1] == '\n') n--;
+    if (slot->len == (unsigned)n) {
+        if (n == 0) return 0;
+        if ((size_t)slot->off + n < doc->arena_len &&
+            doc->arena[slot->off + n] == '\0' &&
+            memcmp(doc->arena + slot->off, text, n) == 0)
+            return 0;
+    }
     if (!user_text_ok(text, n)) return -1;
     if (n == 0) {
         slot->off = 0;
@@ -458,10 +507,10 @@ fill_defaults(TrWidget *w)
         tr_copy_cap(p->value, sizeof p->value, defs[i].def ? defs[i].def : "");
     }
     ev = tr_event_defs(w->kind, &ne);
-    for (i = 0; i < ne && i < TR_EVENTS_MAX; i++) {
+    if (ev && ne > 0 && ev[0] && ev[0][0] != '\0') {
         TrEvent *e = &w->events[w->nevents++];
         memset(e, 0, sizeof *e);
-        tr_copy_cap(e->name, sizeof e->name, ev[i]);
+        tr_copy_cap(e->name, sizeof e->name, ev[0]);
     }
 }
 

@@ -1,6 +1,6 @@
 CC ?= gcc
 TCC ?= tcc
-CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
+CFLAGS ?= -O2 -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
 	-Wformat=2 -Wnull-dereference -Wconversion -Werror \
 	-D_FORTIFY_SOURCE=2 -fstack-protector-strong
 INCLUDES := -I src -I runtime -I third_party
@@ -16,7 +16,7 @@ build/TCCRAD: $(CORE) src/ide_ui.c src/main.c src/nk_glue.h third_party/nuklear.
 	$(CC) $(CFLAGS) $(INCLUDES) -c src/ide_ui.c -o build/ide_ui.o
 	$(CC) $(CFLAGS) $(INCLUDES) -c $(CORE) 
 	mv *.o build/ 2>/dev/null || true
-	$(CC) -std=c11 -Wall -Wno-unused-function -Wno-conversion $(INCLUDES) $(XFT_CFLAGS) -c src/main.c -o build/main.o
+	$(CC) -O2 -std=c11 -Wall -Wno-unused-function -Wno-conversion $(INCLUDES) $(XFT_CFLAGS) -c src/main.c -o build/main.o
 	$(CC) $(CFLAGS) -o build/TCCRAD build/*.o -lX11 -lXft -lm
 
 build/test_core: tests/test_core.c $(CORE)

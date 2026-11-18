@@ -5,6 +5,7 @@
 
 static int nk_one(Gen *g, const TrWidget *w, int d);
 static int nk_children(Gen *g, int parent, int d);
+static int nk_signals(Gen *g, const TrWidget *w, int d, int window, int skip_click);
 
 static const char *
 nk_align(const TrWidget *w)
@@ -129,20 +130,15 @@ nk_leaf_label(Gen *g, const TrWidget *w, int d)
 {
     if (cg_gi(g, d, "nk_label(ctx, ") != 0) return -1;
     if (cg_text(g, w, "text") != 0) return -1;
-    if (cg_gp(g, ", %s);\n", nk_align(w)) != 0) return -1;
-    if (!cg_event_armed(g->doc, w, cg_event(w, "click"))) return 0;
-    if (cg_gi(g, d, "if (nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT))\n") != 0) return -1;
-    return call_ev(g, w, "click", d + 1);
+    return cg_gp(g, ", %s);\n", nk_align(w));
 }
 
 static int
 nk_leaf_button(Gen *g, const TrWidget *w, int d)
 {
-    if (cg_gi(g, d, "if (nk_button_label(ctx, ") != 0) return -1;
+    if (cg_gi(g, d, "nk_button_label(ctx, ") != 0) return -1;
     if (cg_text(g, w, "label") != 0) return -1;
-    if (cg_gp(g, ")) {\n") != 0) return -1;
-    if (call_ev(g, w, "click", d + 1) != 0) return -1;
-    return cg_gi(g, d, "}\n");
+    return cg_gp(g, ");\n");
 }
 
 static int
@@ -336,8 +332,14 @@ nk_leaf_progress(Gen *g, const TrWidget *w, int d)
     if (cg_gi(g, d + 1, "if (%s < 0) %s = 0;\n", s.lv, s.lv) != 0) return -1;
     if (cg_gi(g, d + 1, "if (%s > tr_max) %s = tr_max;\n", s.lv, s.lv) != 0) return -1;
     if (cg_gi(g, d + 1, "tr_cur = (nk_size)%s;\n", s.lv) != 0) return -1;
-    if (cg_gi(g, d + 1, "nk_progress(ctx, &tr_cur, (nk_size)tr_max, nk_true);\n") != 0) return -1;
-    if (cg_gi(g, d + 1, "%s = (int)tr_cur;\n", s.lv) != 0) return -1;
+    if (cg_gi(g, d + 1, "{\n") != 0) return -1;
+    if (cg_gi(g, d + 2, "int tr_was = %s;\n", s.lv) != 0) return -1;
+    if (cg_gi(g, d + 2, "nk_progress(ctx, &tr_cur, (nk_size)tr_max, nk_true);\n") != 0) return -1;
+    if (cg_gi(g, d + 2, "%s = (int)tr_cur;\n", s.lv) != 0) return -1;
+    if (cg_gi(g, d + 2, "if (%s != tr_was) {\n", s.lv) != 0) return -1;
+    if (call_ev(g, w, "change", d + 3) != 0) return -1;
+    if (cg_gi(g, d + 2, "}\n") != 0) return -1;
+    if (cg_gi(g, d + 1, "}\n") != 0) return -1;
     return cg_gi(g, d, "}\n");
 }
 
@@ -351,6 +353,10 @@ nk_leaf_color(Gen *g, const TrWidget *w, int d)
     if (nk_state_int(g, w, "a", d, &a) != 0) return -1;
     if (cg_gi(g, d, "{\n") != 0) return -1;
     if (cg_gi(g, d + 1, "struct nk_colorf tr_c;\n") != 0) return -1;
+    if (cg_gi(g, d + 1, "int tr_r0 = %s;\n", r.lv) != 0) return -1;
+    if (cg_gi(g, d + 1, "int tr_g0 = %s;\n", gc.lv) != 0) return -1;
+    if (cg_gi(g, d + 1, "int tr_b0 = %s;\n", b.lv) != 0) return -1;
+    if (cg_gi(g, d + 1, "int tr_a0 = %s;\n", a.lv) != 0) return -1;
     if (cg_gi(g, d + 1, "tr_c.r = (float)tr_bound_int(%s, 0, 255) / 255.0f;\n", r.lv) != 0) return -1;
     if (cg_gi(g, d + 1, "tr_c.g = (float)tr_bound_int(%s, 0, 255) / 255.0f;\n", gc.lv) != 0) return -1;
     if (cg_gi(g, d + 1, "tr_c.b = (float)tr_bound_int(%s, 0, 255) / 255.0f;\n", b.lv) != 0) return -1;
@@ -360,6 +366,11 @@ nk_leaf_color(Gen *g, const TrWidget *w, int d)
     if (cg_gi(g, d + 1, "%s = tr_bound_int((int)(tr_c.g * 255.0f), 0, 255);\n", gc.lv) != 0) return -1;
     if (cg_gi(g, d + 1, "%s = tr_bound_int((int)(tr_c.b * 255.0f), 0, 255);\n", b.lv) != 0) return -1;
     if (cg_gi(g, d + 1, "%s = tr_bound_int((int)(tr_c.a * 255.0f), 0, 255);\n", a.lv) != 0) return -1;
+    if (cg_gi(g, d + 1, "if (%s != tr_r0 || %s != tr_g0 || %s != tr_b0 || %s != tr_a0) {\n",
+            r.lv, gc.lv, b.lv, a.lv) != 0)
+        return -1;
+    if (call_ev(g, w, "change", d + 2) != 0) return -1;
+    if (cg_gi(g, d + 1, "}\n") != 0) return -1;
     return cg_gi(g, d, "}\n");
 }
 
@@ -390,8 +401,13 @@ nk_tree(Gen *g, const TrWidget *w, int d, const char *kind)
     if (nk_children(g, w->id, d + 2) != 0) return -1;
     if (cg_gi(g, d + 2, "nk_tree_pop(ctx);\n") != 0) return -1;
     if (cg_gi(g, d + 1, "}\n") != 0) return -1;
-    if (cg_gi(g, d + 1, "%s = (tr_st == NK_MAXIMIZED);\n", s.lv) != 0) return -1;
-    if (call_ev(g, w, "toggle", d + 1) != 0) return -1;
+    if (cg_gi(g, d + 1, "{\n") != 0) return -1;
+    if (cg_gi(g, d + 2, "int tr_open_was = %s;\n", s.lv) != 0) return -1;
+    if (cg_gi(g, d + 2, "%s = (tr_st == NK_MAXIMIZED);\n", s.lv) != 0) return -1;
+    if (cg_gi(g, d + 2, "if (%s != tr_open_was) {\n", s.lv) != 0) return -1;
+    if (call_ev(g, w, "toggle", d + 3) != 0) return -1;
+    if (cg_gi(g, d + 2, "}\n") != 0) return -1;
+    if (cg_gi(g, d + 1, "}\n") != 0) return -1;
     return cg_gi(g, d, "}\n");
 }
 
@@ -407,7 +423,9 @@ nk_tabs(Gen *g, const TrWidget *w, int d)
     if (nk_state_int(g, w, "selected", d, &s) != 0) return -1;
     if (n == 0) return 0;
     if (cg_gi(g, d, "if (%s < 0 || %s >= %d) %s = 0;\n", s.lv, s.lv, n, s.lv) != 0) return -1;
-    if (cg_gi(g, d, "nk_layout_row_dynamic(ctx, 28, %d);\n", n) != 0) return -1;
+    if (cg_gi(g, d, "{\n") != 0) return -1;
+    if (cg_gi(g, d + 1, "int tr_tab_was = %s;\n", s.lv) != 0) return -1;
+    if (cg_gi(g, d + 1, "nk_layout_row_dynamic(ctx, 28, %d);\n", n) != 0) return -1;
     for (i = 0; i < n; i++) {
         const TrWidget *tab = &g->doc->widgets[kids[i]];
         if (cg_gi(g, d, "if (nk_select_label(ctx, ") != 0) return -1;
@@ -417,10 +435,13 @@ nk_tabs(Gen *g, const TrWidget *w, int d)
     for (i = 0; i < n; i++) {
         const TrWidget *tab = &g->doc->widgets[kids[i]];
         if (cg_gi(g, d, "if (%s == %d) {\n", s.lv, i) != 0) return -1;
-        if (nk_children(g, tab->id, d + 1) != 0) return -1;
-        if (cg_gi(g, d, "}\n") != 0) return -1;
+        if (nk_children(g, tab->id, d + 2) != 0) return -1;
+        if (cg_gi(g, d + 1, "}\n") != 0) return -1;
     }
-    return call_ev(g, w, "change", d);
+    if (cg_gi(g, d + 1, "if (%s != tr_tab_was) {\n", s.lv) != 0) return -1;
+    if (call_ev(g, w, "change", d + 2) != 0) return -1;
+    if (cg_gi(g, d + 1, "}\n") != 0) return -1;
+    return cg_gi(g, d, "}\n");
 }
 
 static int
@@ -456,6 +477,7 @@ nk_table(Gen *g, const TrWidget *w, int d)
     if (plain_int(g, w, "rows", 3) != 0) return -1;
     if (cg_gp(g, ";\n") != 0) return -1;
     if (cg_gi(g, d + 1, "int row;\n") != 0) return -1;
+    if (cg_gi(g, d + 1, "int tr_pick = -1;\n") != 0) return -1;
     if (cg_gi(g, d + 1, "if (tr_rows < 0) tr_rows = 0;\n") != 0) return -1;
     if (cg_gi(g, d + 1, "if (tr_rows > TCCRAD_LOOP_MAX) tr_rows = TCCRAD_LOOP_MAX;\n") != 0) return -1;
     if (tr_prop_int(w, "header", 1)) {
@@ -479,10 +501,14 @@ nk_table(Gen *g, const TrWidget *w, int d)
                     g->doc->class_name, c) != 0)
                 return -1;
             if (cg_gi(g, d + 2, "nk_label(ctx, tr_cell, NK_TEXT_LEFT);\n") != 0) return -1;
+            if (cg_gi(g, d + 2, "if (nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT)) tr_pick = row;\n") != 0)
+                return -1;
         }
     }
     if (cg_gi(g, d + 1, "}\n") != 0) return -1;
-    if (call_ev(g, w, "select", d + 1) != 0) return -1;
+    if (cg_gi(g, d + 1, "if (tr_pick >= 0) {\n") != 0) return -1;
+    if (call_ev(g, w, "select", d + 2) != 0) return -1;
+    if (cg_gi(g, d + 1, "}\n") != 0) return -1;
     return cg_gi(g, d, "}\n");
 }
 
@@ -546,12 +572,15 @@ nk_menu(Gen *g, const TrWidget *bar, int d)
             if (cg_gp(g, ", NK_TEXT_LEFT)) {\n") != 0) return -1;
             if (call_ev(g, it, "click", d + 2) != 0) return -1;
             if (cg_gi(g, d + 1, "}\n") != 0) return -1;
+            if (nk_signals(g, it, d + 1, 0, 1) != 0) return -1;
         }
         if (cg_gi(g, d + 1, "nk_menu_end(ctx);\n") != 0) return -1;
+        if (nk_signals(g, menu, d + 1, 0, 0) != 0) return -1;
         if (cg_gi(g, d, "}\n") != 0) return -1;
     }
     if (cg_gi(g, d, "nk_layout_row_end(ctx);\n") != 0) return -1;
-    return cg_gi(g, d, "nk_menubar_end(ctx);\n");
+    if (cg_gi(g, d, "nk_menubar_end(ctx);\n") != 0) return -1;
+    return nk_signals(g, bar, d, 0, 0);
 }
 
 static int
@@ -638,10 +667,7 @@ nk_body(Gen *g, const TrWidget *w, int d)
     case TR_KIND_IMAGE:
         if (cg_gi(g, d, "nk_label(ctx, ") != 0) return -1;
         if (cg_text(g, w, "path") != 0) return -1;
-        if (cg_gp(g, ", NK_TEXT_LEFT);\n") != 0) return -1;
-        if (!cg_event_armed(g->doc, w, cg_event(w, "click"))) return 0;
-        if (cg_gi(g, d, "if (nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT))\n") != 0) return -1;
-        return call_ev(g, w, "click", d + 1);
+        return cg_gp(g, ", NK_TEXT_LEFT);\n");
     case TR_KIND_CUSTOM: {
         char hn[TR_NAME_MAX];
         const TrEvent *ev = cg_event(w, "draw");
@@ -667,6 +693,127 @@ nk_body(Gen *g, const TrWidget *w, int d)
 }
 
 static int
+ev_on(const Gen *g, const TrWidget *w, const char *name)
+{
+    return cg_event_armed(g->doc, w, cg_event(w, name));
+}
+
+static int
+nk_signals(Gen *g, const TrWidget *w, int d, int window, int skip_click)
+{
+    int click = !skip_click && ev_on(g, w, "click");
+    int dbl = ev_on(g, w, "dblclick");
+    int down = ev_on(g, w, "down");
+    int up = ev_on(g, w, "up");
+    int move = ev_on(g, w, "move");
+    int enter = ev_on(g, w, "enter");
+    int leave = ev_on(g, w, "leave");
+    int focus = ev_on(g, w, "focus");
+    int blur = ev_on(g, w, "blur");
+    int keydown = ev_on(g, w, "keydown");
+    int keyup = ev_on(g, w, "keyup");
+    int need_hot = enter || leave || move || up || down || keydown || keyup;
+    int need_box = window && (click || dbl || need_hot);
+    if (!(click || dbl || down || up || move || enter || leave || focus || blur || keydown || keyup))
+        return 0;
+    if (cg_gi(g, d, "{\n") != 0) return -1;
+    if (need_box && cg_gi(g, d + 1, "struct nk_rect tr_b = nk_window_get_content_region(ctx);\n") != 0)
+        return -1;
+    if (need_hot) {
+        if (window) {
+            if (cg_gi(g, d + 1, "int tr_hot = nk_input_is_mouse_hovering_rect(&ctx->input, tr_b);\n") != 0)
+                return -1;
+        } else if (cg_gi(g, d + 1, "int tr_hot = nk_widget_is_hovered(ctx);\n") != 0) {
+            return -1;
+        }
+    }
+    if (enter || leave) {
+        if (enter) {
+            if (cg_gi(g, d + 1, "if (tr_hot && !ui->tr_hov_%d) {\n", w->id) != 0) return -1;
+            if (call_ev(g, w, "enter", d + 2) != 0) return -1;
+            if (cg_gi(g, d + 1, "}\n") != 0) return -1;
+        }
+        if (leave) {
+            if (cg_gi(g, d + 1, "if (!tr_hot && ui->tr_hov_%d) {\n", w->id) != 0) return -1;
+            if (call_ev(g, w, "leave", d + 2) != 0) return -1;
+            if (cg_gi(g, d + 1, "}\n") != 0) return -1;
+        }
+        if (cg_gi(g, d + 1, "ui->tr_hov_%d = tr_hot;\n", w->id) != 0) return -1;
+    }
+    if (focus || blur) {
+        if (cg_gi(g, d + 1, "{\n") != 0) return -1;
+        if (cg_gi(g, d + 2, "int tr_on = (ctx->last_widget_state & NK_WIDGET_STATE_ACTIVE) != 0;\n") != 0)
+            return -1;
+        if (focus) {
+            if (cg_gi(g, d + 2, "if (tr_on && !ui->tr_act_%d) {\n", w->id) != 0) return -1;
+            if (call_ev(g, w, "focus", d + 3) != 0) return -1;
+            if (cg_gi(g, d + 2, "}\n") != 0) return -1;
+        }
+        if (blur) {
+            if (cg_gi(g, d + 2, "if (!tr_on && ui->tr_act_%d) {\n", w->id) != 0) return -1;
+            if (call_ev(g, w, "blur", d + 3) != 0) return -1;
+            if (cg_gi(g, d + 2, "}\n") != 0) return -1;
+        }
+        if (cg_gi(g, d + 2, "ui->tr_act_%d = tr_on;\n", w->id) != 0) return -1;
+        if (cg_gi(g, d + 1, "}\n") != 0) return -1;
+    }
+    if (move) {
+        if (cg_gi(g, d + 1, "if (tr_hot && nk_input_is_mouse_moved(&ctx->input))\n") != 0) return -1;
+        if (call_ev(g, w, "move", d + 2) != 0) return -1;
+    }
+    if (down) {
+        if (cg_gi(g, d + 1, "if (tr_hot && nk_input_is_mouse_pressed(&ctx->input, NK_BUTTON_LEFT))\n") != 0)
+            return -1;
+        if (call_ev(g, w, "down", d + 2) != 0) return -1;
+    }
+    if (up) {
+        if (cg_gi(g, d + 1, "if (tr_hot && nk_input_is_mouse_released(&ctx->input, NK_BUTTON_LEFT))\n") != 0)
+            return -1;
+        if (call_ev(g, w, "up", d + 2) != 0) return -1;
+    }
+    if (click) {
+        if (window) {
+            if (cg_gi(g, d + 1, "if (nk_input_is_mouse_click_in_rect(&ctx->input, NK_BUTTON_LEFT, tr_b))\n") != 0)
+                return -1;
+        } else if (cg_gi(g, d + 1, "if (nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT))\n") != 0) {
+            return -1;
+        }
+        if (call_ev(g, w, "click", d + 2) != 0) return -1;
+    }
+    if (dbl) {
+        if (window) {
+            if (cg_gi(g, d + 1, "if (nk_input_is_mouse_click_in_rect(&ctx->input, NK_BUTTON_DOUBLE, tr_b))\n") != 0)
+                return -1;
+        } else if (cg_gi(g, d + 1, "if (nk_widget_is_mouse_clicked(ctx, NK_BUTTON_DOUBLE))\n") != 0) {
+            return -1;
+        }
+        if (call_ev(g, w, "dblclick", d + 2) != 0) return -1;
+    }
+    if (keydown || keyup) {
+        if (cg_gi(g, d + 1, "if (tr_hot) {\n") != 0) return -1;
+        if (cg_gi(g, d + 2, "int tr_k;\n") != 0) return -1;
+        if (cg_gi(g, d + 2, "for (tr_k = 0; tr_k < (int)NK_KEY_MAX; tr_k++) {\n") != 0) return -1;
+        if (keydown) {
+            if (cg_gi(g, d + 3, "if (nk_input_is_key_pressed(&ctx->input, (enum nk_keys)tr_k)) {\n") != 0)
+                return -1;
+            if (call_ev(g, w, "keydown", d + 4) != 0) return -1;
+            if (cg_gi(g, d + 4, "break;\n") != 0) return -1;
+            if (cg_gi(g, d + 3, "}\n") != 0) return -1;
+        }
+        if (keyup) {
+            if (cg_gi(g, d + 3, "if (nk_input_is_key_released(&ctx->input, (enum nk_keys)tr_k)) {\n") != 0)
+                return -1;
+            if (call_ev(g, w, "keyup", d + 4) != 0) return -1;
+            if (cg_gi(g, d + 4, "break;\n") != 0) return -1;
+            if (cg_gi(g, d + 3, "}\n") != 0) return -1;
+        }
+        if (cg_gi(g, d + 2, "}\n") != 0) return -1;
+        if (cg_gi(g, d + 1, "}\n") != 0) return -1;
+    }
+    return cg_gi(g, d, "}\n");
+}
+
+static int
 nk_one(Gen *g, const TrWidget *w, int d)
 {
     int rc;
@@ -675,10 +822,17 @@ nk_one(Gen *g, const TrWidget *w, int d)
         if (cg_cstr(g, w->config) != 0) return -1;
         if (cg_gp(g, ")) {\n") != 0) return -1;
         rc = nk_body(g, w, d + 1);
+        if (rc == 0 && !tr_kind_is_window(w->kind) && w->kind != TR_KIND_MENU &&
+            w->kind != TR_KIND_MENUITEM)
+            rc = nk_signals(g, w, d + 1, 0, 0);
         if (cg_gi(g, d, "}\n") != 0) return -1;
         return rc;
     }
-    return nk_body(g, w, d);
+    rc = nk_body(g, w, d);
+    if (rc == 0 && !tr_kind_is_window(w->kind) && w->kind != TR_KIND_MENU &&
+        w->kind != TR_KIND_MENUITEM)
+        rc = nk_signals(g, w, d, 0, 0);
+    return rc;
 }
 
 static int
@@ -740,8 +894,23 @@ nk_begin_root(Gen *g, const TrWidget *w, int d)
     }
     if (win_flags(g, w) != 0) return -1;
     if (cg_gp(g, ")) {\n") != 0) return -1;
-    if (call_ev(g, w, "appear", d + 2) != 0) return -1;
+    if (ev_on(g, w, "appear") || ev_on(g, w, "resize")) {
+        if (cg_gi(g, d + 2, "if (!ui->tr_seen_%d) {\n", w->id) != 0) return -1;
+        if (cg_gi(g, d + 3, "ui->tr_seen_%d = 1;\n", w->id) != 0) return -1;
+        if (cg_gi(g, d + 3, "ui->tr_rw_%d = (int)vw;\n", w->id) != 0) return -1;
+        if (cg_gi(g, d + 3, "ui->tr_rh_%d = (int)vh;\n", w->id) != 0) return -1;
+        if (call_ev(g, w, "appear", d + 3) != 0) return -1;
+        if (cg_gi(g, d + 2, "} else if ((int)vw != ui->tr_rw_%d || (int)vh != ui->tr_rh_%d) {\n",
+                w->id, w->id) != 0)
+            return -1;
+        if (cg_gi(g, d + 3, "ui->tr_rw_%d = (int)vw;\n", w->id) != 0) return -1;
+        if (cg_gi(g, d + 3, "ui->tr_rh_%d = (int)vh;\n", w->id) != 0) return -1;
+        if (call_ev(g, w, "resize", d + 3) != 0) return -1;
+        if (cg_gi(g, d + 2, "}\n") != 0) return -1;
+    }
+    if (call_ev(g, w, "paint", d + 2) != 0) return -1;
     if (nk_children(g, w->id, d + 2) != 0) return -1;
+    if (nk_signals(g, w, d + 2, 1, 0) != 0) return -1;
     if (cg_gi(g, d + 1, "}\n") != 0) return -1;
     if (cg_gi(g, d + 1, "nk_end(ctx);\n") != 0) return -1;
     if (cg_gi(g, d + 1, "if (nk_window_is_hidden(ctx, \"%s\")) {\n", w->name) != 0) return -1;

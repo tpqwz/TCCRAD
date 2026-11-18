@@ -28,6 +28,10 @@ void uiQuit(void);
 uiWindow *uiNewWindow(const char *t, int w, int h, int menu);
 void uiWindowSetMargined(uiWindow *w, int m);
 void uiWindowOnClosing(uiWindow *w, int (*f)(uiWindow *, void *), void *data);
+void uiWindowOnContentSizeChanged(uiWindow *w, void (*f)(uiWindow *, void *), void *data);
+void uiWindowOnFocusChanged(uiWindow *w, void (*f)(uiWindow *, void *), void *data);
+int uiWindowFocused(uiWindow *w);
+void uiWindowSetResizeable(uiWindow *w, int resizeable);
 void uiWindowSetChild(uiWindow *w, uiControl *c);
 void uiWindowSetBorderless(uiWindow *w, int b);
 void uiWindowSetFullscreen(uiWindow *w, int f);
@@ -57,6 +61,7 @@ uiSlider *uiNewSlider(int min, int max);
 void uiSliderSetValue(uiSlider *s, int v);
 int uiSliderValue(uiSlider *s);
 void uiSliderOnChanged(uiSlider *s, void (*f)(uiSlider *, void *), void *d);
+void uiSliderOnReleased(uiSlider *s, void (*f)(uiSlider *, void *), void *d);
 uiCombobox *uiNewCombobox(void);
 void uiComboboxAppend(uiCombobox *c, const char *t);
 void uiComboboxSetSelected(uiCombobox *c, int n);
@@ -82,4 +87,39 @@ void uiTabAppend(uiTab *t, const char *name, uiControl *c);
 uiMenu *uiNewMenu(const char *name);
 uiMenuItem *uiMenuAppendItem(uiMenu *m, const char *name);
 void uiMenuItemOnClicked(uiMenuItem *m, void (*f)(uiMenuItem *, uiWindow *, void *), void *d);
+typedef struct uiTableValue uiTableValue;
+typedef struct uiTableModel uiTableModel;
+typedef struct uiTableModelHandler uiTableModelHandler;
+typedef struct uiTable uiTable;
+typedef unsigned int uiTableValueType;
+enum {
+    uiTableValueTypeString = 0,
+    uiTableValueTypeImage = 1,
+    uiTableValueTypeInt = 2,
+    uiTableValueTypeColor = 3
+};
+struct uiTableModelHandler {
+    int (*NumColumns)(uiTableModelHandler *, uiTableModel *);
+    uiTableValueType (*ColumnType)(uiTableModelHandler *, uiTableModel *, int);
+    int (*NumRows)(uiTableModelHandler *, uiTableModel *);
+    uiTableValue *(*CellValue)(uiTableModelHandler *, uiTableModel *, int, int);
+    void (*SetCellValue)(uiTableModelHandler *, uiTableModel *, int, int, const uiTableValue *);
+};
+typedef struct uiTableTextColumnOptionalParams uiTableTextColumnOptionalParams;
+struct uiTableTextColumnOptionalParams { int ColorModelColumn; };
+typedef struct uiTableParams uiTableParams;
+struct uiTableParams {
+    uiTableModel *Model;
+    int RowBackgroundColorModelColumn;
+};
+#define uiTableModelColumnNeverEditable (-1)
+uiTableValue *uiNewTableValueString(const char *str);
+void uiFreeTableValue(uiTableValue *v);
+uiTableModel *uiNewTableModel(uiTableModelHandler *mh);
+uiTable *uiNewTable(uiTableParams *params);
+void uiTableAppendTextColumn(uiTable *t, const char *name, int textModelColumn,
+    int textEditableModelColumn, uiTableTextColumnOptionalParams *textParams);
+void uiTableHeaderSetVisible(uiTable *t, int visible);
+void uiTableOnRowClicked(uiTable *t, void (*f)(uiTable *, int, void *), void *data);
+void uiTableOnRowDoubleClicked(uiTable *t, void (*f)(uiTable *, int, void *), void *data);
 #endif

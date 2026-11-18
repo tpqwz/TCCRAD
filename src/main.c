@@ -10,9 +10,35 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
+#include <sys/types.h>
 #include <time.h>
 #include <X11/keysym.h>
 #include <X11/Xatom.h>
+
+static int
+x_ready(Display *dpy, int ms)
+{
+    int fd;
+    fd_set fds;
+    struct timeval tv;
+    int woke;
+    if (XPending(dpy)) return 1;
+    fd = ConnectionNumber(dpy);
+    FD_ZERO(&fds);
+    FD_SET(fd, &fds);
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    woke = select(fd + 1, &fds, NULL, NULL, &tv);
+    if (woke > 0 && XPending(dpy)) return 1;
+    if (woke > 0) {
+        struct timespec pause;
+        pause.tv_sec = 0;
+        pause.tv_nsec = 5000000L;
+        nanosleep(&pause, NULL);
+    }
+    return XPending(dpy) > 0;
+}
 
 static int
 shortcut(Ide *ide, XEvent *ev)
@@ -221,9 +247,25 @@ main(int argc, char **argv)
         return 1;
     }
     if (argc > 1 && argv[1][0] != '-') ide_open_path(ide, argv[1]);
+    {
+    int drawn = 0;
+    int again = 0;
     while (running && ide->modal != -1) {
         XEvent ev;
         XWindowAttributes attr;
+        if (!again && drawn) {
+            pid_t child = ide->child;
+            char st[192];
+            int changed;
+            memcpy(st, ide->status, sizeof st);
+            XFlush(dpy);
+            (void)x_ready(dpy, ide->child > 1 ? 30 : 100);
+            ide_poll_child(ide);
+            ide_note_disk(ide);
+            changed = ide->child != child || memcmp(st, ide->status, sizeof st) != 0;
+            if (!changed && !XPending(dpy) && ide->modal != -1) continue;
+        }
+        again = 0;
         nk_input_begin(ctx);
         while (XPending(dpy)) {
             XNextEvent(dpy, &ev);
@@ -235,7 +277,8 @@ main(int argc, char **argv)
             nk_xlib_handle_event(dpy, screen, win, &ev);
         }
         nk_input_end(ctx);
-        if (nk_input_is_key_pressed(&ctx->input, NK_KEY_DEL) && !nk_item_is_any_active(ctx))
+        if (nk_input_is_key_pressed(&ctx->input, NK_KEY_DEL) && !nk_item_is_any_active(ctx) &&
+            ide->view != 1)
             ide_delete(ide);
         XGetWindowAttributes(dpy, win, &attr);
         if (attr.width > 0 && attr.height > 0) {
@@ -272,12 +315,9 @@ main(int argc, char **argv)
             nk_xlib_render(win, nk_rgb(cr, cg, cb));
         }
         XFlush(dpy);
-        {
-            struct timespec tr_sl;
-            tr_sl.tv_sec = 0;
-            tr_sl.tv_nsec = 16000000L;
-            nanosleep(&tr_sl, NULL);
-        }
+        drawn = 1;
+        if (ide->ui_pct != font_pct && ide->ui_pct != font_failed) again = 1;
+    }
     }
     ide_free(ide);
     nk_xfont_del(dpy, font);

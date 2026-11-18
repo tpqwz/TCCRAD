@@ -293,6 +293,23 @@ emit_privates(Gen *g)
             if (cg_gi(g, 1, "char tr_p_%d_text[%d];\n", w->id, cap) != 0) return -1;
             if (cg_gi(g, 1, "int tr_p_%d_text_n;\n", w->id) != 0) return -1;
         }
+        if (cg_event_armed(g->doc, w, cg_event(w, "enter")) ||
+            cg_event_armed(g->doc, w, cg_event(w, "leave"))) {
+            if (cg_gi(g, 1, "int tr_hov_%d;\n", w->id) != 0) return -1;
+        }
+        if (cg_event_armed(g->doc, w, cg_event(w, "focus")) ||
+            cg_event_armed(g->doc, w, cg_event(w, "blur"))) {
+            if (cg_gi(g, 1, "int tr_act_%d;\n", w->id) != 0) return -1;
+        }
+        if (w->kind == TR_KIND_TABLE) {
+            if (cg_gi(g, 1, "int tr_row_%d;\n", w->id) != 0) return -1;
+        }
+        if (cg_event_armed(g->doc, w, cg_event(w, "appear")) ||
+            cg_event_armed(g->doc, w, cg_event(w, "resize"))) {
+            if (cg_gi(g, 1, "int tr_seen_%d;\n", w->id) != 0) return -1;
+            if (cg_gi(g, 1, "int tr_rw_%d;\n", w->id) != 0) return -1;
+            if (cg_gi(g, 1, "int tr_rh_%d;\n", w->id) != 0) return -1;
+        }
     }
     return 0;
 }

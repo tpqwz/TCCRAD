@@ -10,7 +10,7 @@
 #define TR_EXPR_MAX 96
 #define TR_TYPE_MAX 32
 #define TR_PROPS_MAX 10
-#define TR_EVENTS_MAX 3
+#define TR_EVENTS_MAX 16
 #define TR_WIDGETS_MAX 128
 #define TR_FIELDS_MAX 48
 #define TR_CONFIGS_MAX 8

@@ -3,8 +3,8 @@
 
 /*
  * The calls tccrad emits for the libui backend.
- * This is an X11 implementation of that surface. The andlabs library
- * needs GTK headers, which are not required here.
+ * The names follow libui-ng (the maintained fork of andlabs/libui).
+ * This file is the X11 stand-in for those calls. It does not link GTK.
  */
 
 #include <stddef.h>
@@ -42,6 +42,10 @@ void uiQuit(void);
 uiWindow *uiNewWindow(const char *title, int width, int height, int has_menu);
 void uiWindowSetMargined(uiWindow *w, int margined);
 void uiWindowOnClosing(uiWindow *w, int (*f)(uiWindow *, void *), void *data);
+void uiWindowOnContentSizeChanged(uiWindow *w, void (*f)(uiWindow *, void *), void *data);
+void uiWindowOnFocusChanged(uiWindow *w, void (*f)(uiWindow *, void *), void *data);
+int uiWindowFocused(uiWindow *w);
+void uiWindowSetResizeable(uiWindow *w, int resizeable);
 void uiWindowSetChild(uiWindow *w, uiControl *child);
 void uiWindowSetBorderless(uiWindow *w, int borderless);
 void uiWindowSetFullscreen(uiWindow *w, int fullscreen);
@@ -78,6 +82,7 @@ uiSlider *uiNewSlider(int min, int max);
 void uiSliderSetValue(uiSlider *s, int value);
 int uiSliderValue(uiSlider *s);
 void uiSliderOnChanged(uiSlider *s, void (*f)(uiSlider *, void *), void *data);
+void uiSliderOnReleased(uiSlider *s, void (*f)(uiSlider *, void *), void *data);
 
 uiCombobox *uiNewCombobox(void);
 void uiComboboxAppend(uiCombobox *c, const char *text);
@@ -112,5 +117,43 @@ uiMenu *uiNewMenu(const char *name);
 uiMenuItem *uiMenuAppendItem(uiMenu *m, const char *name);
 void uiMenuItemOnClicked(uiMenuItem *item,
     void (*f)(uiMenuItem *, uiWindow *, void *), void *data);
+
+typedef struct uiTableValue uiTableValue;
+typedef struct uiTableModel uiTableModel;
+typedef struct uiTableModelHandler uiTableModelHandler;
+typedef struct uiTable uiTable;
+typedef unsigned int uiTableValueType;
+enum {
+    uiTableValueTypeString = 0,
+    uiTableValueTypeImage = 1,
+    uiTableValueTypeInt = 2,
+    uiTableValueTypeColor = 3
+};
+struct uiTableModelHandler {
+    int (*NumColumns)(uiTableModelHandler *, uiTableModel *);
+    uiTableValueType (*ColumnType)(uiTableModelHandler *, uiTableModel *, int);
+    int (*NumRows)(uiTableModelHandler *, uiTableModel *);
+    uiTableValue *(*CellValue)(uiTableModelHandler *, uiTableModel *, int, int);
+    void (*SetCellValue)(uiTableModelHandler *, uiTableModel *, int, int, const uiTableValue *);
+};
+typedef struct uiTableTextColumnOptionalParams uiTableTextColumnOptionalParams;
+struct uiTableTextColumnOptionalParams {
+    int ColorModelColumn;
+};
+typedef struct uiTableParams uiTableParams;
+struct uiTableParams {
+    uiTableModel *Model;
+    int RowBackgroundColorModelColumn;
+};
+#define uiTableModelColumnNeverEditable (-1)
+uiTableValue *uiNewTableValueString(const char *str);
+void uiFreeTableValue(uiTableValue *v);
+uiTableModel *uiNewTableModel(uiTableModelHandler *mh);
+uiTable *uiNewTable(uiTableParams *params);
+void uiTableAppendTextColumn(uiTable *t, const char *name, int textModelColumn,
+    int textEditableModelColumn, uiTableTextColumnOptionalParams *textParams);
+void uiTableHeaderSetVisible(uiTable *t, int visible);
+void uiTableOnRowClicked(uiTable *t, void (*f)(uiTable *, int, void *), void *data);
+void uiTableOnRowDoubleClicked(uiTable *t, void (*f)(uiTable *, int, void *), void *data);
 
 #endif

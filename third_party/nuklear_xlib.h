@@ -844,6 +844,10 @@ nk_xlib_handle_event(Display *dpy, int screen, Window win, XEvent *evt)
         else if (*code == XK_Delete)    nk_input_key(ctx, NK_KEY_DEL, down);
         else if (*code == XK_Return || *code == XK_KP_Enter)    nk_input_key(ctx, NK_KEY_ENTER, down);
         else if (*code == XK_Tab)       nk_input_key(ctx, NK_KEY_TAB, down);
+        else if (*code == XK_Left && (evt->xkey.state & ControlMask))
+            nk_input_key(ctx, NK_KEY_TEXT_WORD_LEFT, down);
+        else if (*code == XK_Right && (evt->xkey.state & ControlMask))
+            nk_input_key(ctx, NK_KEY_TEXT_WORD_RIGHT, down);
         else if (*code == XK_Left)      nk_input_key(ctx, NK_KEY_LEFT, down);
         else if (*code == XK_Right)     nk_input_key(ctx, NK_KEY_RIGHT, down);
         else if (*code == XK_Up)        nk_input_key(ctx, NK_KEY_UP, down);
@@ -882,10 +886,6 @@ nk_xlib_handle_event(Display *dpy, int screen, Window win, XEvent *evt)
                 nk_input_key(ctx, NK_KEY_TEXT_UNDO, down);
             else if (*code == 'r' && (evt->xkey.state & ControlMask))
                 nk_input_key(ctx, NK_KEY_TEXT_REDO, down);
-            else if (*code == XK_Left && (evt->xkey.state & ControlMask))
-                nk_input_key(ctx, NK_KEY_TEXT_WORD_LEFT, down);
-            else if (*code == XK_Right && (evt->xkey.state & ControlMask))
-                nk_input_key(ctx, NK_KEY_TEXT_WORD_RIGHT, down);
             else if (*code == 'b' && (evt->xkey.state & ControlMask))
                 nk_input_key(ctx, NK_KEY_TEXT_LINE_START, down);
             else if (*code == 'e' && (evt->xkey.state & ControlMask))

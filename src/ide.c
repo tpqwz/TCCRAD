@@ -161,6 +161,62 @@ ide_def_line(const char *text, const char *name)
     return -1;
 }
 
+int
+ide_ident_at(const char *text, size_t n, size_t at, char *dst, size_t cap)
+{
+    size_t b;
+    size_t e;
+    size_t len;
+    if (!dst || cap < 2) return 0;
+    dst[0] = '\0';
+    if (!text || n == 0 || at > n) return 0;
+    if (at == n || !ide_id_char(text[at])) {
+        if (at == 0 || !ide_id_char(text[at - 1])) return 0;
+        at--;
+    }
+    b = at;
+    while (b > 0 && ide_id_char(text[b - 1])) b--;
+    e = at + 1;
+    while (e < n && ide_id_char(text[e])) e++;
+    len = e - b;
+    if (len == 0 || len >= cap || len > 47) return 0;
+    if (text[b] >= '0' && text[b] <= '9') return 0;
+    memcpy(dst, text + b, len);
+    dst[len] = '\0';
+    return 1;
+}
+
+int
+ide_ident_uses(const char *text, size_t n, const char *name, int *lines, int max)
+{
+    size_t nlen;
+    size_t i = 0;
+    int line = 0;
+    int count = 0;
+    if (!text || !name || !lines || max < 1) return 0;
+    nlen = strlen(name);
+    if (nlen == 0 || nlen > 64) return 0;
+    while (i < n && count < max && line < 100000) {
+        size_t eol = i;
+        size_t k;
+        while (eol < n && text[eol] != '\n') eol++;
+        k = i;
+        while (k + nlen <= eol) {
+            int left = k == i || !ide_id_char(text[k - 1]);
+            int right = k + nlen == eol || !ide_id_char(text[k + nlen]);
+            if (left && right && memcmp(text + k, name, nlen) == 0) {
+                lines[count++] = line;
+                break;
+            }
+            k++;
+        }
+        if (eol >= n) break;
+        i = eol + 1;
+        line++;
+    }
+    return count;
+}
+
 static int
 line_after_brace(const char *text, int sig)
 {
@@ -373,6 +429,8 @@ ide_code_set_spaced(Ide *ide, int spaced, const char *text, size_t n)
         ide->code_rope = NULL;
         ide->code_live = 0;
     }
+    ide->code_tied = 0;
+    ide->code_tie = NULL;
     free(ide->code_lens);
     ide->code_lens = NULL;
     ide->code_lens_n = 0;
@@ -436,6 +494,31 @@ ide_user_writable(const char *text, size_t at, int del)
         } else if (at >= begin && at <= end) {
             return 1;
         }
+        p = stop + 14;
+    }
+    return any ? 0 : 1;
+}
+
+int
+ide_span_writable(const char *text, size_t lo, size_t hi)
+{
+    const char *p;
+    int any = 0;
+    if (!text || hi < lo) return 0;
+    p = text;
+    while ((p = strstr(p, "/* @tccrad user ")) != NULL) {
+        const char *nl = strchr(p, '\n');
+        const char *stop = strstr(p, "/* @end user */");
+        size_t begin;
+        size_t end;
+        any = 1;
+        if (!nl || !stop || stop < nl) {
+            p += 16;
+            continue;
+        }
+        begin = (size_t)(nl + 1 - text);
+        end = (size_t)(stop - text);
+        if (lo >= begin && hi <= end) return 1;
         p = stop + 14;
     }
     return any ? 0 : 1;
@@ -673,33 +756,36 @@ ide_scope_show(const char *line, int *depth)
 }
 
 int
-ide_scope_gutter(const char *line, int *depth, char *dst, size_t cap)
+ide_scope_gutter_n(const char *line, size_t n, int *depth, char *dst, size_t cap)
 {
     int d = depth ? *depth : 0;
     unsigned char kind[12];
     int i;
     int in_str = 0;
     int used = d;
-    size_t n = 0;
+    size_t at = 0;
+    size_t o = 0;
     if (dst && cap) dst[0] = '\0';
     if (!line || !dst || cap < 4) return -1;
     for (i = 0; i < 12; i++) kind[i] = 0;
     for (i = 0; i < d && i < 12; i++) kind[i] = 2;
-    for (i = 0; line[i] != '\0'; i++) {
-        char c = line[i];
+    while (at < n) {
+        char c = line[at];
         if (in_str) {
-            if (c == '\\' && line[i + 1] != '\0') {
-                i++;
+            if (c == '\\' && at + 1 < n) {
+                at += 2;
                 continue;
             }
             if (c == '"') in_str = 0;
+            at++;
             continue;
         }
         if (c == '"') {
             in_str = 1;
+            at++;
             continue;
         }
-        if (c == '/' && line[i + 1] == '/') break;
+        if (c == '/' && at + 1 < n && line[at + 1] == '/') break;
         if (c == '{') {
             if (d < 12) kind[d] = 1;
             d++;
@@ -709,6 +795,7 @@ ide_scope_gutter(const char *line, int *depth, char *dst, size_t cap)
             if (d < 12) kind[d] = 3;
             if (d + 1 > used) used = d + 1;
         }
+        at++;
     }
     if (d < 0) d = 0;
     if (used > 12) used = 12;
@@ -717,16 +804,24 @@ ide_scope_gutter(const char *line, int *depth, char *dst, size_t cap)
         if (kind[i] == 1) g = "\xE2\x94\x8C";
         else if (kind[i] == 2) g = "\xE2\x94\x82";
         else if (kind[i] == 3) g = "\xE2\x94\x94";
-        if (n + 3 >= cap) break;
-        dst[n++] = g[0];
+        if (o + 3 >= cap) break;
+        dst[o++] = g[0];
         if ((unsigned char)g[0] > 127) {
-            dst[n++] = g[1];
-            dst[n++] = g[2];
+            dst[o++] = g[1];
+            dst[o++] = g[2];
         }
     }
-    dst[n] = '\0';
+    dst[o] = '\0';
     if (depth) *depth = d;
     return 0;
+}
+
+int
+ide_scope_gutter(const char *line, int *depth, char *dst, size_t cap)
+{
+    size_t n = 0;
+    if (line) n = strlen(line);
+    return ide_scope_gutter_n(line, n, depth, dst, cap);
 }
 
 static int
@@ -819,7 +914,7 @@ int
 ide_primary_event(const TrWidget *w)
 {
     static const char *const order[] = {
-        "click", "change", "toggle", "select", "draw", "appear", "close", NULL
+        "select", "click", "change", "toggle", "draw", "appear", "close", NULL
     };
     int i;
     int e;
@@ -872,6 +967,9 @@ open_event_at(Ide *ide, int id, int ev)
         ide_set_status(ide, "that control has no event");
         return -1;
     }
+    ide->preview_fresh = 0;
+    ide->code_tied = 0;
+    ide->code_tie = NULL;
     ide->body_id = id;
     tr_rope_free(ide->code_rope);
     ide->code_rope = NULL;
@@ -901,7 +999,10 @@ ide_open_named_event(Ide *ide, int id, const char *evname)
     w = tr_doc_widget(ide->doc, id);
     if (!w) return -1;
     ev = tr_widget_add_event(w, evname);
-    if (ev < 0) return -1;
+    if (ev < 0) {
+        ide_set_status(ide, "that component cannot take another event");
+        return -1;
+    }
     return open_event_at(ide, id, ev);
 }
 
@@ -984,50 +1085,68 @@ ide_new(void)
     return ide;
 }
 
+static void
+drop_live_code(Ide *ide)
+{
+    ide->code_live = 0;
+    ide->code_applied = 0;
+    tr_rope_free(ide->code_rope);
+    ide->code_rope = NULL;
+    free(ide->code_lens);
+    ide->code_lens = NULL;
+    ide->code_lens_n = 0;
+    ide->code_lens_sig = 0;
+}
+
 void
 ide_apply_code(Ide *ide)
 {
     char *text;
     size_t n = 0;
     char err[160];
-    if (!ide || !ide->code_live || !ide->code_rope) return;
+    char *host = NULL;
+    char *use;
+    size_t use_n;
+    if (!ide || !ide->code_live || !ide->code_rope || ide->code_applied) return;
     text = tr_rope_flat(ide->code_rope, &n);
     if (!text) return;
     err[0] = '\0';
-    {
-        char *host = NULL;
-        char *use = text;
-        size_t use_n = n;
-        if (ide->code_spaced) {
-            if (tr_spaced_emit(text, n, &host, &use_n, err, sizeof err) != 0 || !host) {
-                ide_set_status(ide, err[0] ? err : "spaced C did not convert");
-                free(text);
-                return;
-            }
-            use = host;
+    use = text;
+    use_n = n;
+    if (ide->code_spaced) {
+        if (tr_spaced_emit(text, n, &host, &use_n, err, sizeof err) != 0 || !host) {
+            ide_set_status(ide, err[0] ? err : "spaced C did not convert");
+            ide->code_applied = 1;
+            free(host);
+            free(text);
+            return;
         }
-        if (ide->code_ext[0] != '\0') {
-            if (tr_write_file(ide->code_ext, use, use_n) != 0)
-                ide_set_status(ide, "could not write that file");
-            else
-                ide_set_status(ide, "wrote the file");
-        } else if (strstr(use, "@tccrad-doc") != NULL) {
-            if (tr_doc_load_text(ide->doc, use, use_n, err, sizeof err) != 0)
-                ide_set_status(ide, err[0] ? err : "code did not apply");
-            else {
-                ide->dirty = 1;
-                ide_set_status(ide, "code applied");
-                ide->code_live = 0;
-                tr_rope_free(ide->code_rope);
-                ide->code_rope = NULL;
-                free(ide->code_lens);
-                ide->code_lens = NULL;
-                ide->code_lens_n = 0;
-                ide->code_lens_sig = 0;
-            }
-        }
-        free(host);
+        use = host;
     }
+    if (ide->code_ext[0] != '\0') {
+        if (tr_write_file(ide->code_ext, use, use_n) != 0) {
+            ide_set_status(ide, "could not write that file");
+            ide->code_applied = 1;
+        } else {
+            ide_set_status(ide, "wrote the file");
+            drop_live_code(ide);
+        }
+    } else if (strstr(use, "@tccrad-doc") != NULL) {
+        if (tr_doc_load_text(ide->doc, use, use_n, err, sizeof err) != 0) {
+            ide_set_status(ide, err[0] ? err : "code did not apply");
+            ide->code_applied = 1;
+        } else {
+            ide->dirty = 1;
+            ide_set_status(ide, "code applied");
+            ide->preview_fresh = 0;
+            ide->code_tied = 0;
+            ide->code_tie = NULL;
+            drop_live_code(ide);
+        }
+    } else {
+        ide->code_applied = 1;
+    }
+    free(host);
     free(text);
 }
 
@@ -1182,6 +1301,9 @@ ide_after_frame(Ide *ide, int active)
         return;
     }
     if (strcmp(now, ide->committed) != 0) {
+        ide->preview_fresh = 0;
+        ide->code_tied = 0;
+        ide->code_tie = NULL;
         if (!ide->gesture) {
             push_undo(ide, ide->committed);
             clear_redo(ide);

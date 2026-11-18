@@ -597,6 +597,128 @@ test_scene(void)
 }
 
 static void
+test_spaced_switch(void)
+{
+    Ide *ide = ide_new();
+    char *buf;
+    expect(ide != NULL, "spaced ide");
+    if (!ide) return;
+    buf = malloc(8);
+    expect(buf != NULL, "spaced buf");
+    if (!buf) {
+        ide_free(ide);
+        return;
+    }
+    memcpy(buf, "int x;\n", 8);
+    ide->code_spaced = 1;
+    ide->code_lens = buf;
+    ide->code_lens_n = 7;
+    ide->code_tie = buf;
+    ide->code_tied = 1;
+    expect(ide_code_set_spaced(ide, 0, "int x;\n", 7) == 0, "leave spaced");
+    expect(ide->code_lens == NULL, "lens dropped");
+    expect(ide->code_tie == NULL, "tie dropped");
+    expect(ide->code_tied == 0, "untied");
+    expect(ide->code_spaced == 0, "back to C");
+    ide_free(ide);
+}
+
+static void
+test_ident(void)
+{
+    const char *s = "int main(void)\n{\n  main();\n  other(main);\n}\n";
+    char name[48];
+    int lines[8];
+    int n;
+    size_t len = strlen(s);
+    expect(ide_ident_at(s, len, 4, name, sizeof name) == 1, "ident at main");
+    expect(strcmp(name, "main") == 0, "ident is main");
+    expect(ide_ident_at(s, len, 0, name, sizeof name) == 1, "ident at int");
+    expect(strcmp(name, "int") == 0, "ident is int");
+    n = ide_ident_uses(s, len, "main", lines, 8);
+    expect(n == 3, "three uses of main");
+    expect(lines[0] == 0 && lines[1] == 2 && lines[2] == 3, "use lines");
+    expect(ide_ident_uses(s, len, "mai", lines, 8) == 0, "no prefix match");
+}
+
+static void
+test_event_catalog(void)
+{
+    int n = 0;
+    int i;
+    int saw_key = 0;
+    const char *const *e = tr_event_defs(TR_KIND_BUTTON, &n);
+    expect(n >= 11 && e && strcmp(e[0], "click") == 0, "button events");
+    for (i = 0; e && i < n; i++) {
+        if (strcmp(e[i], "keydown") == 0) saw_key = 1;
+    }
+    expect(saw_key == 1, "button OnKeyDown");
+    e = tr_event_defs(TR_KIND_CHECKBOX, &n);
+    expect(n >= 12 && e && strcmp(e[0], "click") == 0, "checkbox events");
+    expect(e && strcmp(e[n - 1], "change") == 0, "checkbox OnChange");
+    e = tr_event_defs(TR_KIND_WINDOW, &n);
+    expect(n >= 14 && e && strcmp(e[0], "appear") == 0 && strcmp(e[1], "close") == 0,
+        "form events");
+    e = tr_event_defs(TR_KIND_INPUT, &n);
+    expect(n >= 12 && e && strcmp(e[0], "change") == 0, "input OnChange");
+    e = tr_event_defs(TR_KIND_TABLE, &n);
+    expect(n >= 12 && e && strcmp(e[0], "select") == 0, "table events");
+    e = tr_event_defs(TR_KIND_CUSTOM, &n);
+    expect(n >= 12 && e && strcmp(e[0], "draw") == 0, "custom OnPaint");
+}
+
+static void
+test_span_write(void)
+{
+    const char *t = "/* @tccrad user event 1 click */\nhello;\n/* @end user */\n";
+    const char *nl = strchr(t, '\n');
+    const char *end = strstr(t, "/* @end user */");
+    char buf[8];
+    char g[32];
+    int depth = 0;
+    size_t begin;
+    expect(nl != NULL && end != NULL && end > nl, "span markers");
+    if (!nl || !end || end < nl) return;
+    begin = (size_t)(nl + 1 - t);
+    expect(ide_span_writable(t, begin, begin) == 1, "insert in handler");
+    expect(ide_span_writable(t, begin, (size_t)(end - t)) == 1, "body is writable");
+    expect(ide_span_writable(t, 0, 1) == 0, "marker line stays locked");
+    expect(ide_span_writable(t, begin, (size_t)(end - t) + 1) == 0, "span stops at the marker");
+    expect(ide_span_writable("int x;\n", 0, 6) == 1, "unmarked file is writable");
+    expect(ide_span_writable(t, 4, 2) == 0, "inverted span rejected");
+    buf[0] = '{';
+    buf[1] = '\n';
+    buf[2] = '}';
+    buf[3] = '\0';
+    expect(ide_scope_gutter_n(buf, 1, &depth, g, sizeof g) == 0, "gutter span");
+    expect(depth == 1, "gutter span does not read the next line");
+}
+
+static void
+test_span_stable(void)
+{
+    TrDoc *doc = tr_doc_new();
+    size_t before;
+    int i;
+    const char *got;
+    expect(doc != NULL, "span doc");
+    if (!doc) return;
+    expect(tr_span_set(doc, &doc->user_header, "abc", 3) == 0, "span header");
+    expect(tr_span_set(doc, &doc->user_fields, "xyz", 3) == 0, "span fields");
+    before = doc->arena_len;
+    for (i = 0; i < 1000; i++) {
+        if (tr_span_set(doc, &doc->user_header, "abc", 3) != 0) break;
+    }
+    expect(i == 1000, "span repeat");
+    expect(doc->arena_len == before, "span set does not grow the arena");
+    expect(tr_span_set(doc, &doc->user_header, "abcd", 4) == 0, "span change");
+    got = tr_span_ptr(doc, doc->user_header);
+    expect(got && strcmp(got, "abcd") == 0, "span bytes");
+    expect(doc->user_header.len == 4, "span len");
+    tr_doc_free(doc);
+}
+
+static void
 test_reject(void)
 {
     TrDoc *doc = tr_doc_new();
@@ -615,6 +737,11 @@ main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/tmp/tccrad-test";
     test_buf();
+    test_span_stable();
+    test_spaced_switch();
+    test_ident();
+    test_event_catalog();
+    test_span_write();
     test_roundtrip();
     test_codegen(dir);
     test_reject();
